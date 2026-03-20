@@ -86,7 +86,7 @@ export class ReActAgent {
             }
 
             if (action.startsWith("Finish")) {
-                const match = action.match(/Finish\[(.*)\]/s);
+                const match = action.match(/Finish\[([\s\S]*)\]/);
                 const finalAnswer = match ? match[1] : "";
                 return finalAnswer;
             }
@@ -127,15 +127,15 @@ export class ReActAgent {
     }
 
     private parseOutput(text: string): { thought: string | null; action: string | null } {
-        const thoughtMatch = text.match(/Thought:\s*(.*?)(?=\nAction:|$)/s);
-        const actionMatch = text.match(/Action:\s*(.*?)$/s);
+        const thoughtMatch = text.match(/Thought:\s*([\s\S]*?)(?=\nAction:|$)/);
+        const actionMatch = text.match(/Action:\s*([\s\S]*?)$/);
         const thought = thoughtMatch ? thoughtMatch[1].trim() : null;
         const action = actionMatch ? actionMatch[1].trim() : null;
         return { thought, action };
     }
 
     private parseAction(actionText: string): { toolName: string | null; toolInput: string | null } {
-        const match = actionText.match(/(\w+)\[(.*)\]/s);
+        const match = actionText.match(/(\w+)\[([\s\S]*)\]/);
         if (!match) return { toolName: null, toolInput: null };
         return { toolName: match[1], toolInput: match[2] };
     }
