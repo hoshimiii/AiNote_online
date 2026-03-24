@@ -237,8 +237,8 @@ export const WorkPage = () => {
                                                 </SidebarMenuButton>
                                                 <SidebarMenuAction asChild>
                                                     <DeleteDialog
-                                                        title="確定要刪除任務嗎?"
-                                                        description="此操作無法撤銷，相關數據將永久消失"
+                                                        title="确定要删除任务吗?"
+                                                        description="此操作无法撤销，相关数据将永久消失"
                                                         onConfirm={() => deleteMission(mission.MissionId)}
                                                         trigger={<Button variant="ghost" size="sm" className="cursor-pointer group-hover/menu-item:block hidden"><TrashIcon className="w-4 h-4 text-red-500" /></Button>} />
                                                 </SidebarMenuAction>

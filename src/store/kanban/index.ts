@@ -873,6 +873,7 @@ export const useWorkSpace = create<WorkSpaceProps>()(
         {
             name: 'workspace-storage',
             version: 5,
+            skipHydration: true, // ZustandRehydrate 组件会在客户端手动触发 rehydrate()
             migrate: (persistedState: any, version: number) => {
                 let state = persistedState;
                 if (version < 1) {
