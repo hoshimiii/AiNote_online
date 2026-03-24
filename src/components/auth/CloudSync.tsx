@@ -17,37 +17,98 @@ import { useEffect, useRef } from "react"
 import { useSession } from "next-auth/react"
 import { useWorkSpace } from "@/store/kanban"
 
-// localStorage key：记录上次成功从云端拉取数据的时间戳（毫秒）
 const LAST_CLOUD_PULL_KEY = "__ainote_last_cloud_pull"
 
-// 从 zustand store state 中提取可序列化的字段（排除函数）
-function extractSerializableState(state: ReturnType<typeof useWorkSpace.getState>) {
-  const {
-    workspaces,
-    activeWorkSpaceId,
-    activeMissionId,
-    currentMissionId,
-    currentNoteId,
-    previewMissionId,
-    missionOrder,
-    boardOrder,
-    missions,
-    boards,
-    tasks,
-  } = state
-  return {
-    workspaces,
-    activeWorkSpaceId,
-    activeMissionId,
-    currentMissionId,
-    currentNoteId,
-    previewMissionId,
-    missionOrder,
-    boardOrder,
-    missions,
-    boards,
-    tasks,
+// 自动从 store state 中提取所有可序列化字段（过滤掉函数类型的 actions）。
+//
+// 优势：不再硬编码字段列表——未来向 store 新增任何非函数字段时，
+// 会自动被纳入云端同步，无需手动维护。
+function extractSerializableState(
+  state: ReturnType<typeof useWorkSpace.getState>
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(state as unknown as Record<string, unknown>).filter(
+      ([, v]) => typeof v !== "function"
+    )
+  )
+}
+
+// 关键字段结构定义：同步前必须通过这些检查，否则拒绝应用云端数据。
+// 这是防止服务端返回损坏数据时覆盖本地正常状态的最后一道防线。
+const REQUIRED_FIELDS: Array<{ key: string; type: "array" | "object" | "any" }> = [
+  { key: "workspaces", type: "array" },
+  { key: "missions", type: "object" },
+  { key: "boards", type: "object" },
+  { key: "tasks", type: "object" },
+  { key: "missionOrder", type: "object" },
+  { key: "boardOrder", type: "object" },
+]
+
+// 验证云端数据结构，并与本地当前 store 状态合并后安全应用。
+//
+// 策略：
+// - 对关键字段做类型检查，任一不通过则整体拒绝（不做部分写入）
+// - 只覆盖云端数据中存在的字段；云端缺失的字段（可能是新增字段）保留本地值
+// - 未知的云端字段（本地 store 没有的 key）不会被注入，防止污染 store
+//
+// 返回 true 表示数据有效并已应用，false 表示验证失败已跳过。
+function validateAndApplyCloudData(
+  cloudData: unknown,
+  isSyncing: { current: boolean }
+): boolean {
+  // 基础类型检查：必须是非 null 的普通对象
+  if (!cloudData || typeof cloudData !== "object" || Array.isArray(cloudData)) {
+    console.warn("[CloudSync] 云端数据格式无效（非对象），跳过覆盖")
+    return false
   }
+
+  const incoming = cloudData as Record<string, unknown>
+
+  // 关键字段结构校验
+  for (const { key, type } of REQUIRED_FIELDS) {
+    if (!(key in incoming)) {
+      console.warn(`[CloudSync] 云端数据缺少必要字段 "${key}"，跳过覆盖`)
+      return false
+    }
+    const v = incoming[key]
+    if (type === "array" && !Array.isArray(v)) {
+      console.warn(`[CloudSync] 字段 "${key}" 应为 Array，实际为 ${typeof v}，跳过覆盖`)
+      return false
+    }
+    if (
+      type === "object" &&
+      (typeof v !== "object" || Array.isArray(v) || v === null)
+    ) {
+      console.warn(`[CloudSync] 字段 "${key}" 应为 Object，实际为 ${typeof v}，跳过覆盖`)
+      return false
+    }
+  }
+
+  // 获取本地 store 所有数据键（非函数）——作为允许覆盖的白名单
+  const currentState = useWorkSpace.getState()
+  const currentAsMap = currentState as unknown as Record<string, unknown>
+  const localDataKeys = Object.entries(currentAsMap)
+    .filter(([, v]) => typeof v !== "function")
+    .map(([k]) => k)
+
+  // 构建合并后的状态：
+  //   - 云端有的字段 → 用云端值（跨设备同步）
+  //   - 云端没有的字段 → 保留本地值（兼容未来新增字段）
+  //   - 云端有但本地 store 不认识的字段 → 忽略（防止注入未知数据）
+  const merged: Record<string, unknown> = {}
+  for (const key of localDataKeys) {
+    merged[key] = key in incoming ? incoming[key] : currentAsMap[key]
+  }
+
+  isSyncing.current = true
+  // 先用 Partial 更新已知字段，再单独覆盖其余部分，绕过 zustand 对 replace:true 的严格类型检查
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  useWorkSpace.setState(merged as any, true)
+  // 短暂延迟后重置 flag，让 subscribe 恢复正常工作
+  setTimeout(() => {
+    isSyncing.current = false
+  }, 200)
+  return true
 }
 
 export function CloudSync() {
@@ -95,11 +156,15 @@ export function CloudSync() {
 
         if (cloudTime > lastPull) {
           // 云端比上次同步更新（例如另一台设备做了修改）
-          isSyncing.current = true
-          // true 参数替换全部 state（而非合并）
-          useWorkSpace.setState(result.data as object, true)
-          localStorage.setItem(LAST_CLOUD_PULL_KEY, String(cloudTime))
-          setTimeout(() => { isSyncing.current = false }, 200)
+          // 经过结构验证和安全合并后再应用
+          const applied = validateAndApplyCloudData(result.data, isSyncing)
+          if (applied) {
+            localStorage.setItem(LAST_CLOUD_PULL_KEY, String(cloudTime))
+          } else {
+            // 验证失败：云端数据有问题，推送本地数据覆盖云端
+            console.warn("[CloudSync] 云端数据验证失败，以本地数据覆盖云端")
+            pushToCloud()
+          }
         } else {
           // 本地更新，将本地最新状态推给云端
           pushToCloud()
