@@ -42,7 +42,7 @@ export function LoginForm() {
             onClick={() => { setMode(m); setError(null) }}
             className={`flex-1 rounded-md py-1.5 text-sm font-medium transition-colors ${
               mode === m
-                ? "bg-primary text-primary-foreground shadow-sm"
+                ? "bg-primary shadow-sm"
                 : "text-muted-foreground hover:text-foreground"
             }`}
           >
@@ -98,7 +98,7 @@ export function LoginForm() {
           </p>
         )}
 
-        <Button type="submit" className="w-full" disabled={isPending}>
+        <Button type="submit" className="w-full hover:brightness-95 transition-[filter]" disabled={isPending} variant="secondary">
           {isPending ? "处理中…" : mode === "login" ? "登录" : "注册并登录"}
         </Button>
       </form>
