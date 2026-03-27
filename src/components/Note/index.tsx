@@ -25,7 +25,7 @@ export const NoteItem = ({ note, nowmission }: { note: NoteType, nowmission: str
         return () => window.removeEventListener('popstate', handlePopState);
     }, []);
     return (
-        <div className="flex flex-col gap-2 text-sm p-1 ml-2 h-4">
+        <div className="flex flex-col text-xs p-0.5 ml-1 h-auto leading-none">
             <div className="flex justify-between items-center">
                 {note.noteTitle}
                 <div className="flex items-end">

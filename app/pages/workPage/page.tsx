@@ -229,6 +229,18 @@ export const WorkPage = () => {
 
                             <SortableContext items={orderedMissions.map(m => m.MissionId)} strategy={verticalListSortingStrategy}>
                                 <SidebarMenu>
+                                    {orderedMissions.length === 0 && (
+                                        <div className="flex flex-col items-center justify-center py-8 gap-2 text-muted-foreground">
+                                            <p className="text-sm">还没有任何任务</p>
+                                            <Button variant="default" className="cursor-pointer" onClick={() => createMission({
+                                                MissionId: generateRandomId(),
+                                                activeNoteId: null,
+                                                WorkSpaceId: activeWorkSpaceId || '',
+                                                title: 'New Mission',
+                                                Notes: []
+                                            })}>创建第一个 Mission</Button>
+                                        </div>
+                                    )}
                                     {orderedMissions.map((mission) => (
                                         <SidebarMenuItem className="group/menu-item flex-col bg-gray-100 rounded-md p-1" key={mission.MissionId}>
                                             <div className="flex justify-between items-center">
@@ -254,7 +266,7 @@ export const WorkPage = () => {
                                                 <SidebarMenuSub className="group/sub-menu-item flex-col bg-gray-200 rounded-md p-1 mt-1 h-fit" key={'notes'}>
                                                     <SidebarContent>
                                                         {mission.Notes?.map((note) => (
-                                                            <SidebarMenuItem key={note.noteId} className="h-5" onClick={() => handleClicknote(mission.MissionId, note.noteId)}>
+                                                            <SidebarMenuItem key={note.noteId} className="h-auto py-0.5" onClick={() => handleClicknote(mission.MissionId, note.noteId)}>
                                                                 <NoteItem note={note} nowmission={mission.MissionId} />
                                                             </SidebarMenuItem>
                                                         ))}
@@ -277,15 +289,6 @@ export const WorkPage = () => {
                                 </SidebarMenu>
                             </SortableContext>
 
-                            <Button className="cursor-pointer mt-2" variant="outline" onClick={() => {
-                                if (!currentMissionId) return;
-                                createBoard({
-                                    BoardId: generateRandomId(),
-                                    MissionId: currentMissionId,
-                                    title: 'New Board',
-                                    Tasks: [],
-                                });
-                            }}>Create New Board</Button>
                         </SidebarContent>
                         <SidebarFooter className="mt-auto">
                             <Button variant="ghost" size="icon" className="cursor-pointer" onClick={() => setSettingsOpen(true)}>
