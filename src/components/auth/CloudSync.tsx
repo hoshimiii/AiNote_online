@@ -26,14 +26,24 @@
 
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useSession } from "next-auth/react"
 import { useWorkSpace } from "@/store/kanban"
 import { useChatbot} from '@/store/Chatbot'
 
+const KANBAN_LOCAL_ONLY_KEYS = new Set([
+  "activeWorkSpaceId",
+  "activeMissionId",
+  "currentMissionId",
+  "currentNoteId",
+  "previewMissionId",
+])
+
 function extractKanbanState(state: ReturnType<typeof useWorkSpace.getState>): Record<string, unknown> {
   return Object.fromEntries(
-    Object.entries(state as unknown as Record<string, unknown>).filter(([, v]) => typeof v !== "function")
+    Object.entries(state as unknown as Record<string, unknown>).filter(
+      ([k, v]) => typeof v !== "function" && !KANBAN_LOCAL_ONLY_KEYS.has(k)
+    )
   )
 }
 
@@ -84,12 +94,16 @@ function validateAndApplyCloudData(
   const kanbanKeys = Object.entries(currentKanban).filter(([, v]) => typeof v !== "function").map(([k]) => k)
   const mergedKanban: Record<string, unknown> = {}
   for (const key of kanbanKeys) {
-    mergedKanban[key] = key in incoming ? incoming[key] : currentKanban[key]
+    if (KANBAN_LOCAL_ONLY_KEYS.has(key)) {
+      mergedKanban[key] = currentKanban[key]
+    } else {
+      mergedKanban[key] = key in incoming ? incoming[key] : currentKanban[key]
+    }
   }
 
   isSyncing.current = true
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  useWorkSpace.setState(mergedKanban as any, true)
+  useWorkSpace.setState(mergedKanban as any)
 
   // 应用 chatbot 数据（如果存在）
   if (incoming._chatbot && typeof incoming._chatbot === "object" && !Array.isArray(incoming._chatbot)) {
@@ -100,7 +114,7 @@ function validateAndApplyCloudData(
       if (key in chatbotData) mergedChatbot[key] = chatbotData[key]
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    useChatbot.setState(mergedChatbot as any, true)
+    useChatbot.setState(mergedChatbot as any)
   }
 
   setTimeout(() => { isSyncing.current = false }, 200)
@@ -112,6 +126,7 @@ export function CloudSync() {
   const hasPulled = useRef(false)
   const isSyncing = useRef(false)
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [syncState, setSyncState] = useState<"pulling" | "pushing" | "done" | null>(null)
 
   const pushToCloud = () => {
     const snapshot = {
@@ -137,12 +152,15 @@ export function CloudSync() {
   useEffect(() => {
     if (status !== "authenticated" || !session?.user?.id || hasPulled.current) return
     hasPulled.current = true
+    setSyncState("pulling")
 
     fetch("/api/sync")
       .then((res) => (res.ok ? res.json() : null))
       .then((result) => {
         if (!result?.data) {
+          setSyncState("pushing")
           pushToCloud()
+          setTimeout(() => setSyncState("done"), 1500)
           return
         }
 
@@ -153,15 +171,16 @@ export function CloudSync() {
         if (cloudTime > lastSynced) {
           const applied = validateAndApplyCloudData(result.data, isSyncing)
           if (applied) {
-            // isSyncing 在 validateAndApplyCloudData 里已设为 true，直接更新不会触发 subscribe
             useWorkSpace.getState().setCloudSyncTime(result.updatedAt)
           } else {
             console.warn("[CloudSync] 云端数据验证失败，以本地数据覆盖云端")
+            setSyncState("pushing")
             pushToCloud()
           }
         }
+        setTimeout(() => setSyncState("done"), 1500)
       })
-      .catch(console.error)
+      .catch(() => setSyncState(null))
   }, [status, session?.user?.id])
 
   useEffect(() => {
@@ -192,5 +211,21 @@ export function CloudSync() {
     }
   }, [status])
 
-  return null
+  if (!syncState || syncState === null) return null
+
+  return (
+    <div className="fixed top-4 left-1/2 -translate-x-1/2 z-9999 flex items-center gap-2 rounded-full bg-background border shadow-md px-4 py-2 text-sm text-foreground transition-all">
+      {syncState === "done" ? (
+        <>
+          <span className="h-2 w-2 rounded-full bg-green-500" />
+          数据已同步
+        </>
+      ) : (
+        <>
+          <span className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
+          {syncState === "pulling" ? "正在从云端读取数据..." : "正在上传本地数据..."}
+        </>
+      )}
+    </div>
+  )
 }
