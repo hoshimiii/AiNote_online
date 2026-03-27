@@ -102,6 +102,8 @@ interface WorkSpaceProps {
     currentNoteId: string | null,
     previewMissionId: string | null,
 
+    _cloudSyncTime: string | null,
+
     missionOrder: Record<string, string[]>,
     boardOrder: Record<string, string[]>,
 
@@ -158,6 +160,8 @@ interface WorkSpaceProps {
     deleteBlock: (note: Note, blockId: string) => void,
     RenameBlock: (note: Note, blockId: string, newName: string) => void,
     updateBlock: (note: Note, blockId: string, newBlock: Block) => void,
+
+    setCloudSyncTime: (time: string) => void,
 
     getCurrentContext: () => CurrentContextSnapshot,
     getMissionSnapshot: (missionId: string) => MissionSnapshot | null,
@@ -251,6 +255,7 @@ export const useWorkSpace = create<WorkSpaceProps>()(
             currentNoteId: null,
             previewMissionId: null,
             activeNoteId: null,
+            _cloudSyncTime: null,
             missionOrder: {},
             boardOrder: {},
             missions: {},
@@ -757,6 +762,10 @@ export const useWorkSpace = create<WorkSpaceProps>()(
                     };
                 });
             },
+            setCloudSyncTime: (time: string) => {
+                set({ _cloudSyncTime: time });
+            },
+
             getCurrentContext: () => {
                 const state = get();
                 const currentMission = state.currentMissionId ? state.missions[state.currentMissionId] : null;
