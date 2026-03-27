@@ -126,7 +126,9 @@ export function CloudSync() {
       .then((res) => (res.ok ? res.json() : null))
       .then((result) => {
         if (result?.updatedAt) {
+          isSyncing.current = true
           useWorkSpace.getState().setCloudSyncTime(result.updatedAt)
+          setTimeout(() => { isSyncing.current = false }, 100)
         }
       })
       .catch(console.error)
@@ -151,6 +153,7 @@ export function CloudSync() {
         if (cloudTime > lastSynced) {
           const applied = validateAndApplyCloudData(result.data, isSyncing)
           if (applied) {
+            // isSyncing 在 validateAndApplyCloudData 里已设为 true，直接更新不会触发 subscribe
             useWorkSpace.getState().setCloudSyncTime(result.updatedAt)
           } else {
             console.warn("[CloudSync] 云端数据验证失败，以本地数据覆盖云端")
