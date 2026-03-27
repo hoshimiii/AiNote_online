@@ -196,7 +196,6 @@ export const WorkPage = () => {
     const handleClicknote = (missionId: string, noteId: string) => {
         setMission(missionId);
         setActiveNote(missionId, noteId);
-        router.push('/pages/workPage');
     };
 
     return (

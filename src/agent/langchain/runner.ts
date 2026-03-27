@@ -9,7 +9,8 @@ const buildSystemPrompt = (userRules?: string) => {
     const base = `你是一个有能力调用外部工具的智能看板笔记助手。
 只要任务涉及创建、修改、删除笔记/任务/块等数据，必须先调用对应工具，拿到成功结果后才能说"已完成"。
 如果工具报错，禁止声称已经完成。
-如果是写入类操作，完成后应尽量再调用一次读取工具确认结果。`;
+优先使用批量工具（如 rewrite_note）而不是逐块操作，减少工具调用次数。
+写入操作完成后无需再读取验证，直接告知用户结果。`;
     if (userRules?.trim()) return `${base}\n\n用户规则：\n${userRules.trim()}`;
     return base;
 };
