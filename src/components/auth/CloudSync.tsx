@@ -198,9 +198,29 @@ export function CloudSync() {
       debounceTimer.current = setTimeout(pushToCloud, 2000)
     })
 
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return
+      fetch("/api/sync")
+        .then((res) => (res.ok ? res.json() : null))
+        .then((result) => {
+          if (!result?.data) return
+          const cloudTime = new Date(result.updatedAt).getTime()
+          const localSyncTime = useWorkSpace.getState()._cloudSyncTime
+          const lastSynced = localSyncTime ? new Date(localSyncTime).getTime() : 0
+          if (cloudTime > lastSynced) {
+            const applied = validateAndApplyCloudData(result.data, isSyncing)
+            if (applied) useWorkSpace.getState().setCloudSyncTime(result.updatedAt)
+          }
+        })
+        .catch(console.error)
+    }
+
+    document.addEventListener("visibilitychange", onVisible)
+
     return () => {
       unsubKanban()
       unsubChatbot()
+      document.removeEventListener("visibilitychange", onVisible)
       if (debounceTimer.current) clearTimeout(debounceTimer.current)
     }
   }, [status])
