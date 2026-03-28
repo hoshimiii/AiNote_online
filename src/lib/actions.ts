@@ -7,7 +7,8 @@
 
 "use server"
 
-import { signIn, signOut } from "./auth"
+import { randomBytes } from "crypto"
+import { signIn, signOut, auth } from "./auth"
 import { AuthError } from "next-auth"
 import { prisma } from "./prisma"
 import bcrypt from "bcryptjs"
@@ -88,4 +89,29 @@ export async function registerAction(
 // 登出 Server Action
 export async function logoutAction() {
   await signOut({ redirectTo: "/login" })
+}
+
+export async function getMcpApiKeyStatus(): Promise<{ hasKey: boolean }> {
+  const session = await auth()
+  if (!session?.user?.id) return { hasKey: false }
+  const u = await prisma.user.findUnique({
+    where: { id: session.user.id },
+    select: { mcpApiKey: true },
+  })
+  return { hasKey: !!u?.mcpApiKey }
+}
+
+export async function generateMcpApiKey(): Promise<{ key: string } | { error: string }> {
+  const session = await auth()
+  if (!session?.user?.id) return { error: "未登录" }
+
+  const raw = randomBytes(32).toString("hex")
+  const hashed = await bcrypt.hash(raw, 12)
+
+  await prisma.user.update({
+    where: { id: session.user.id },
+    data: { mcpApiKey: hashed },
+  })
+
+  return { key: `ainote_${raw}` }
 }

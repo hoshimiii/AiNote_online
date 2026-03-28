@@ -27,6 +27,8 @@ export const authConfig: NextAuthConfig = {
 
       const isLoginPage = pathname === "/login"
       const isApiRoute = pathname.startsWith("/api/")
+      const isPublicApi =
+        pathname.startsWith("/api/auth") || pathname.startsWith("/api/mcp")
 
       // 已登录用户访问登录页 → 重定向到工作区
       if (isLoggedIn && isLoginPage) {
@@ -34,7 +36,7 @@ export const authConfig: NextAuthConfig = {
       }
 
       // 未登录用户访问 API 路由 → 返回 401（避免 HTML 重定向进入 JSON 接口）
-      if (!isLoggedIn && isApiRoute && !pathname.startsWith("/api/auth")) {
+      if (!isLoggedIn && isApiRoute && !isPublicApi) {
         return Response.json({ error: "Unauthorized" }, { status: 401 })
       }
 

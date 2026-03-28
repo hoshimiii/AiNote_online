@@ -21,6 +21,6 @@ export const config = {
     // - /_next/static/* （静态资源）
     // - /_next/image/* （图片优化）
     // - /favicon.ico
-    "/((?!api/auth|_next/static|_next/image|favicon.ico).*)",
+    "/((?!api/auth|api/mcp|_next/static|_next/image|favicon.ico).*)",
   ],
 }
