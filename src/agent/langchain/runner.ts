@@ -1,4 +1,10 @@
-import { HumanMessage, AIMessage, SystemMessage, ToolMessage } from "@langchain/core/messages";
+import {
+    HumanMessage,
+    AIMessage,
+    AIMessageChunk,
+    SystemMessage,
+    ToolMessage,
+} from "@langchain/core/messages";
 import type { BaseMessage } from "@langchain/core/messages";
 import { createLangChainModel } from "./model";
 import { createOpenAIToolSchemas, createToolMap } from "./tools";
@@ -21,8 +27,53 @@ const buildSystemPrompt = (userRules?: string) => {
  */
 export interface RunConfig {
     onTrace?: (trace: AgentTrace) => void;
+    onStreamDelta?: (delta: string) => void;
+    onStreamReset?: () => void;
     onToolError?: (toolName: string, error: string, step: number) => "retry" | "abort" | "continue";
     maxSteps?: number;
+}
+
+function textDeltaFromChunk(chunk: AIMessageChunk): string {
+    const c = chunk.content;
+    if (typeof c === "string") return c;
+    if (!Array.isArray(c)) return "";
+    let s = "";
+    for (const block of c) {
+        if (
+            block &&
+            typeof block === "object" &&
+            "type" in block &&
+            (block as { type: string }).type === "text" &&
+            "text" in block
+        ) {
+            s += String((block as { text: string }).text);
+        }
+    }
+    return s;
+}
+
+function chunkToAIMessage(chunk: AIMessageChunk): AIMessage {
+    return new AIMessage({
+        content: chunk.content,
+        tool_calls: chunk.tool_calls ?? [],
+        invalid_tool_calls: chunk.invalid_tool_calls ?? [],
+        additional_kwargs: chunk.additional_kwargs,
+        response_metadata: chunk.response_metadata,
+        id: chunk.id,
+    });
+}
+
+function messageContentString(content: unknown): string {
+    if (typeof content === "string") return content.trim();
+    if (!Array.isArray(content)) return "";
+    return content
+        .map((b) =>
+            b && typeof b === "object" && "type" in b && (b as { type: string }).type === "text" && "text" in b
+                ? String((b as { text: string }).text)
+                : ""
+        )
+        .join("")
+        .trim();
 }
 
 export const runLangChainAgent = async (
@@ -34,7 +85,8 @@ export const runLangChainAgent = async (
     if (!config.usertoken?.trim()) {
         throw new Error("请先在左侧栏设置中配置 API Key");
     }
-    const { onTrace, onToolError, maxSteps: _maxSteps = 20 } = options ?? {};
+    const { onTrace, onStreamDelta, onStreamReset, onToolError, maxSteps: _maxSteps = 20 } =
+        options ?? {};
     const maxSteps = _maxSteps;
     const model = createLangChainModel(config);
     const toolSchemas = createOpenAIToolSchemas();
@@ -55,10 +107,18 @@ export const runLangChainAgent = async (
 
     for (let i = 0; i < maxSteps; i++) {
         const step = i + 1;
-        const response = await modelWithTools.invoke(messages);
+        let gathered: AIMessageChunk | undefined;
+        const tokenStream = await modelWithTools.stream(messages);
+        for await (const part of tokenStream) {
+            gathered = gathered ? gathered.concat(part) : part;
+            const delta = textDeltaFromChunk(part);
+            if (delta) onStreamDelta?.(delta);
+        }
+        if (!gathered) throw new Error("模型无响应");
+        const response = chunkToAIMessage(gathered);
         messages.push(response);
 
-        const contentText = typeof response.content === "string" ? response.content.trim() : "";
+        const contentText = messageContentString(response.content);
         if (contentText && onTrace) {
             onTrace({ step, phase: "thought", content: contentText });
         }
@@ -67,6 +127,8 @@ export const runLangChainAgent = async (
         if (toolCalls.length === 0) {
             return contentText;
         }
+
+        onStreamReset?.();
 
         for (const toolCall of toolCalls) {
             onTrace?.({

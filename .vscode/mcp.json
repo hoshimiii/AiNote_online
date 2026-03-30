@@ -1,0 +1,13 @@
+{
+  "servers": {
+    "ainote-bridge": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "tsx",
+        "E:\\codes\\AiNote\\AiNote_online\\mcp-bridge\\bridge-server.ts"
+      ],
+      "env": {}
+    }
+  }
+}

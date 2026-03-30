@@ -1,0 +1,6 @@
+{
+  "chat.promptFilesLocations": {
+    ".vscode": true
+  },
+  "github.copilot.chat.experimental.agentDesktop.enabled": true
+}

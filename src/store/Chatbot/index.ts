@@ -118,6 +118,22 @@ export const useChatbot = create<ChatbotState>()(
 
                 try {
                     const answer = await runLangChainAgent(get().config, input, historyLines, {
+                        onStreamDelta: (delta) => {
+                            set((state) => ({
+                                messages: state.messages.map((m) =>
+                                    m.messageId === botMsgId
+                                        ? { ...m, messageContent: m.messageContent + delta }
+                                        : m
+                                ),
+                            }));
+                        },
+                        onStreamReset: () => {
+                            set((state) => ({
+                                messages: state.messages.map((m) =>
+                                    m.messageId === botMsgId ? { ...m, messageContent: "" } : m
+                                ),
+                            }));
+                        },
                         onTrace: ({ step, phase, content }) => {
                             const title =
                                 phase === "thought"

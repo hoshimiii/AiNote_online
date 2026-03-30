@@ -39,3 +39,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local dev docs & scripts (synced to cloud via MCP, not needed in repo)
+/docs/
+/scripts/
