@@ -15,27 +15,52 @@ const blockInput = z.object({
 })
 
 async function forward(toolName: string, args: Record<string, unknown>) {
-  const url = process.env.VERCEL_API_URL
-  const key = process.env.AINOTE_API_KEY
-  if (!url?.trim()) throw new Error("VERCEL_API_URL is not set")
-  if (!key?.trim()) throw new Error("AINOTE_API_KEY is not set")
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${key}`,
-    },
-    body: JSON.stringify({ toolName, arguments: args }),
-  })
-  const data = (await res.json()) as { result?: unknown; error?: string }
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
-  return {
-  content: [{ 
-    type: "text" as const, 
-    text: data.error || JSON.stringify(data.result, null, 2) 
-  }],
-  isError: !!data.error // 告知 AI 这是一个错误，它会自动尝试修复或报错
-}
+  const url = process.env.VERCEL_API_URL;
+  const key = process.env.AINOTE_API_KEY;
+
+  // 1. 系统级校验：这些报错会直接中断 Agent
+  if (!url?.trim()) throw new Error("VERCEL_API_URL is not set");
+  if (!key?.trim()) throw new Error("AINOTE_API_KEY is not set");
+
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${key}`,
+      },
+      body: JSON.stringify({ toolName, arguments: args }),
+    });
+
+    // 注意：这里不要直接 throw，先解析内容
+    const data = (await res.json()) as { result?: unknown; error?: string };
+
+    // 2. 业务级错误处理：通过 isError 返回给 AI，让 AI 决定是否重试
+    if (!res.ok || data.error) {
+      return {
+        content: [{ 
+          type: "text" as const, 
+          text: data.error || `HTTP Error ${res.status}` 
+        }],
+        isError: true // 告诉 Agent：工具运行了，但没成功，请根据 text 调整策略
+      };
+    }
+
+    // 3. 成功返回
+    return {
+      content: [{ 
+        type: "text" as const, 
+        text: JSON.stringify(data.result, null, 2) 
+      }],
+      isError: false
+    };
+
+  } catch (e) {
+    // 4. 网络级错误：比如 Vercel 挂了、域名解析失败
+    console.error("MCP Forward 严重故障:", e);
+    // 这里抛出的错误会被外部的 try-catch 捕获，显示为“错误: ...”
+    throw new Error(`网络连接失败: ${e instanceof Error ? e.message : '未知错误'}`);
+  }
 }
 
 const mcpServer = new McpServer({ name: "ainote-bridge", version: "0.1.0" })
