@@ -30,8 +30,12 @@ async function forward(toolName: string, args: Record<string, unknown>) {
   const data = (await res.json()) as { result?: unknown; error?: string }
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
   return {
-    content: [{ type: "text" as const, text: JSON.stringify(data.result ?? null, null, 2) }],
-  }
+  content: [{ 
+    type: "text" as const, 
+    text: data.error || JSON.stringify(data.result, null, 2) 
+  }],
+  isError: !!data.error // 告知 AI 这是一个错误，它会自动尝试修复或报错
+}
 }
 
 const mcpServer = new McpServer({ name: "ainote-bridge", version: "0.1.0" })
