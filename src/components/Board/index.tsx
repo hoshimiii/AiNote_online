@@ -28,7 +28,7 @@ export const Board = ({ nowMissionId, setActiveNoteId }: { nowMissionId: string,
                     const boardSortableId = activeMissionId + '+' + board.BoardId;
                     const taskIds = board.Tasks.map(t => activeMissionId + '+' + board.BoardId + '+' + t.TaskId);
                     return (
-                        <div className="flex flex-col gap-2 w-[120px] h-fit bg-blue-100 rounded-md p-2 group" key={board.BoardId}>
+                        <div className="flex flex-col gap-2 w-[360px] h-fit bg-blue-100 rounded-md p-2 group" key={board.BoardId}>
                             <BoardItem id={boardSortableId} title={board.title}>
                                 <div className="flex items-center gap-1 opacity-0 pointer-events-none transition-opacity
                                                 group-hover:opacity-100 group-hover:pointer-events-auto
