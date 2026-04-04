@@ -43,7 +43,11 @@ async function forwardWithPolicy(
   const log = (level: string, obj: unknown) => {
     try {
       const fn = console[level as keyof Console] || console.log
-      fn("[mcp-bridge]", JSON.stringify(obj))
+      if (typeof fn === "function") {
+        (fn as (...args: unknown[]) => void).call(console, "[mcp-bridge]", JSON.stringify(obj))
+      } else {
+        console.log("[mcp-bridge]", JSON.stringify(obj))
+      }
     } catch (e) {
       console.log("[mcp-bridge]", obj)
     }
@@ -239,7 +243,7 @@ mcpServer.registerTool(
     const defaultOpts = {
       timeoutMs: 30000,
       retries: 2,
-      logLevel: "info"
+      logLevel: "info" as const
     };
     return forwardWithPolicy("organize_wrong_answers", args as Record<string, unknown>, defaultOpts);
   },
