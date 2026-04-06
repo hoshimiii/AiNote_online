@@ -14,9 +14,9 @@ import { Divide } from "lucide-react";
 const SUPPORTED_LANGUAGES = [
     { value: "javascript", label: "JavaScript" },
     { value: "typescript", label: "TypeScript" },
-    { value: "python", label: "Python" },
-    { value: "cpp", label: "C++" },
-    { value: "java", label: "Java" },
+    // { value: "python", label: "Python" },
+    // { value: "cpp", label: "C++" },
+    // { value: "java", label: "Java" },
 ] as const;
 
 function getLanguageExtension(lang?: string): Extension[] {
@@ -41,7 +41,7 @@ const CodeToolbar = ({
     onUpdateBlock?: (updates: Partial<BlockType>) => void;
     onExecute: () => void;
 }) => (
-    <div className="flex items-center justify-between px-2 py-1 bg-gray-50 border-b">
+    <div className="flex items-center py-1 bg-gray-50 border-b gap-3">
         <select
             value={block.language || "javascript"}
             onChange={(e) => onUpdateBlock?.({ language: e.target.value })}
@@ -57,7 +57,7 @@ const CodeToolbar = ({
             disabled={isRunning}
             title="运行代码"
             aria-label="运行代码"
-            className="relative z-10 text-black-500 flex items-center gap-2 px-3 py-1 text-sm rounded-md bg-indigo-600 text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:opacity-60 disabled:bg-indigo-400 transition-shadow shadow-sm"
+            className="relative z-10 text-black-500 text-sm flex mr-auto items-center px-3 py-1 rounded-md bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:opacity-60 disabled:bg-indigo-400 transition-shadow shadow-sm"
         >
             {isRunning ? (
                 <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
@@ -69,7 +69,7 @@ const CodeToolbar = ({
             )}
             <span className="ml-0.5">{isRunning ? "运行中..." : "运行"}</span>
         </button>
-        <div></div> #布局用
+        <div></div>
     </div>
 );
 
