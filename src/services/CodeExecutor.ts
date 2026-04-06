@@ -117,8 +117,33 @@ export class LocalExecutor implements CodeExecutor {
     private async executeInDir(
         code: string,
         language: SupportedLanguage,
-        dir: string
+        dir: string,
+        options?: { entry?: string; args?: any[] }
     ): Promise<ExecutionResult> {
+        const entry = options?.entry;
+        const args = options?.args ?? [];
+
+        const sanitizeName = (n?: string) => {
+            if (!n) return undefined;
+            const m = /^[_A-Za-z$][_A-Za-z0-9$]*$/.exec(n);
+            return m ? n : undefined;
+        };
+        const safeEntry = sanitizeName(entry);
+
+        const wrapForEntry = (lang: SupportedLanguage, src: string) => {
+            if (!safeEntry) return src;
+            if (lang === "javascript" || lang === "typescript") {
+                const argsJson = JSON.stringify(args ?? []);
+                return `${src}\n;(async () => {\n  try {\n    const __ainote_args = ${argsJson};\n    let fn;\n    try { fn = eval("${safeEntry}"); } catch (e) { fn = undefined; }\n    if (typeof fn === 'function') {\n      const res = await fn(...__ainote_args);\n      console.log(JSON.stringify({__AINOTE_RESULT__: res}));\n    } else {\n      console.log(JSON.stringify({__AINOTE_RESULT__: null}));\n    }\n  } catch (e) {\n    console.error(e);\n    process.exit(1);\n  }\n})();\n`;
+            }
+            if (lang === "python") {
+                const argsJson = JSON.stringify(args ?? []);
+                const safe = argsJson.replace(/'/g, "\\'");
+                return `${src}\nimport sys, json, traceback\ntry:\n    __ainote_args = json.loads('${safe}')\nexcept:\n    __ainote_args = []\ntry:\n    fn = globals().get('${safeEntry}')\n    if callable(fn):\n        res = fn(*__ainote_args)\n        print(json.dumps({"__AINOTE_RESULT__": res}, ensure_ascii=False))\n    else:\n        print(json.dumps({"__AINOTE_RESULT__": None}, ensure_ascii=False))\nexcept Exception:\n    traceback.print_exc()\n    sys.exit(1)\n`;
+            }
+            // For cpp/java we don't attempt to auto-wrap complex signatures; return original source
+            return src;
+        };
         switch (language) {
             case "javascript": {
                 const file = join(dir, "main.js");

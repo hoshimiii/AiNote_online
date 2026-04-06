@@ -29,6 +29,48 @@ function getLanguageExtension(lang?: string): Extension[] {
     }
 }
 
+const CodeToolbar = ({
+    block,
+    isRunning,
+    onUpdateBlock,
+    onExecute,
+}: {
+    block: BlockType;
+    isRunning: boolean;
+    onUpdateBlock?: (updates: Partial<BlockType>) => void;
+    onExecute: () => void;
+}) => (
+    <div className="flex items-center justify-between px-2 py-1 bg-gray-50 border-b">
+        <select
+            value={block.language || "javascript"}
+            onChange={(e) => onUpdateBlock?.({ language: e.target.value })}
+            className="h-6 px-1.5 text-xs border rounded bg-white cursor-pointer"
+            onClick={(e) => e.stopPropagation()}
+        >
+            {SUPPORTED_LANGUAGES.map((l) => (
+                <option key={l.value} value={l.value}>{l.label}</option>
+            ))}
+        </select>
+        <button
+            onClick={(e) => { e.stopPropagation(); onExecute(); }}
+            disabled={isRunning}
+            title="运行代码"
+            aria-label="运行代码"
+            className="relative z-10 flex items-center gap-2 px-3 py-1 text-sm rounded-md bg-indigo-600 text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:opacity-60 disabled:bg-indigo-400 transition-shadow shadow-sm"
+        >
+            {isRunning ? (
+                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+            ) : (
+                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
+            )}
+            <span className="ml-0.5">{isRunning ? "运行中..." : "运行"}</span>
+        </button>
+    </div>
+);
+
 const ExecutionOutput = ({ block, onClear }: { block: BlockType; onClear: () => void }) => {
     const hasOutput = block.executionOutput || block.executionError || block.executionExitCode !== undefined;
     if (!hasOutput) return null;
@@ -313,35 +355,7 @@ export const Block = ({
                         case 'code':
                             return (
                                 <div className="border rounded overflow-hidden">
-                                    <div className="flex items-center justify-between px-2 py-1 bg-gray-50 border-b">
-                                        <div className="flex items-center gap-2">
-                                            <select
-                                                value={block.language || "javascript"}
-                                                onChange={(e) => onUpdateBlock?.({ language: e.target.value })}
-                                                className="h-6 px-1.5 text-xs border rounded bg-white cursor-pointer"
-                                                onClick={(e) => e.stopPropagation()}
-                                            >
-                                                {SUPPORTED_LANGUAGES.map((lang) => (
-                                                    <option key={lang.value} value={lang.value}>{lang.label}</option>
-                                                ))}
-                                            </select>
-                                        </div>
-                                        <button
-                                            onClick={(e) => { e.stopPropagation(); handleExecute(); }}
-                                            disabled={isRunning}
-                                            className="flex items-center gap-1 px-2 py-0.5 text-xs rounded bg-green-500 text-white hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
-                                        >
-                                            {isRunning ? (
-                                                <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24">
-                                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                                                </svg>
-                                            ) : (
-                                                <svg className="h-3 w-3" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
-                                            )}
-                                            {isRunning ? "运行中..." : "运行"}
-                                        </button>
-                                    </div>
+                                    <CodeToolbar block={block} isRunning={isRunning} onUpdateBlock={onUpdateBlock} onExecute={handleExecute} />
                                     <CodeMirror
                                         value={content}
                                         onChange={(value) => onChange(value)}
@@ -372,35 +386,7 @@ export const Block = ({
                         case 'code':
                             return (
                                 <div className="border rounded overflow-hidden">
-                                    <div className="flex items-center justify-between px-2 py-1 bg-gray-50 border-b">
-                                        <div className="flex items-center gap-2">
-                                            <select
-                                                value={block.language || "javascript"}
-                                                onChange={(e) => onUpdateBlock?.({ language: e.target.value })}
-                                                className="h-6 px-1.5 text-xs border rounded bg-white cursor-pointer"
-                                                onClick={(e) => e.stopPropagation()}
-                                            >
-                                                {SUPPORTED_LANGUAGES.map((lang) => (
-                                                    <option key={lang.value} value={lang.value}>{lang.label}</option>
-                                                ))}
-                                            </select>
-                                        </div>
-                                        <button
-                                            onClick={(e) => { e.stopPropagation(); handleExecute(); }}
-                                            disabled={isRunning}
-                                            className="flex items-center gap-1 px-2 py-0.5 text-xs rounded bg-green-500 text-white hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
-                                        >
-                                            {isRunning ? (
-                                                <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24">
-                                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                                                </svg>
-                                            ) : (
-                                                <svg className="h-3 w-3" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
-                                            )}
-                                            {isRunning ? "运行中..." : "运行"}
-                                        </button>
-                                    </div>
+                                    <CodeToolbar block={block} isRunning={isRunning} onUpdateBlock={onUpdateBlock} onExecute={handleExecute} />
                                     <CodeMirror
                                         value={content}
                                         onChange={(value) => onChange(value)}
