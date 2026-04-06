@@ -157,15 +157,20 @@ export class LocalExecutor implements CodeExecutor {
                 // Prefer local installed binary to avoid relying on `npx` at runtime (Vercel/CI may not have it)
                 const localBin = join(process.cwd(), "node_modules", ".bin", process.platform === "win32" ? "tsx.cmd" : "tsx");
                 if (existsSync(localBin)) {
-                    // On Unix use `node <bin>` to avoid EINVAL when the bin isn't executable.
-                    // On Windows, run via cmd.exe /c to execute the `.cmd` wrapper reliably.
                     if (process.platform === "win32") {
                         // Use cmd.exe so the .cmd wrapper runs in its intended shell
                         return runProcess("cmd.exe", ["/c", localBin, file], { cwd: dir, timeout: EXECUTION_TIMEOUT });
                     }
-                    // On Unix, the `.bin/tsx` is a shell wrapper. Execute it via `sh -c` so
-                    // the shell script runs (instead of asking node to parse the script).
-                    return runProcess("sh", ["-c", `${localBin} ${file}`], { cwd: dir, timeout: EXECUTION_TIMEOUT });
+                    // On Unix/Vercel: bypass the shell wrapper entirely.
+                    // Call tsx's CJS/ESM entry directly via the current node binary so we
+                    // never touch the shell script that causes EINVAL / SyntaxError.
+                    const tsxCli = join(process.cwd(), "node_modules", "tsx", "dist", "cli.mjs");
+                    if (existsSync(tsxCli)) {
+                        // Run tsx CLI entry directly as the Node.js main module
+                        return runProcess(process.execPath, [tsxCli, file], { cwd: dir, timeout: EXECUTION_TIMEOUT });
+                    }
+                    // Fallback: try tsx's legacy bin via node
+                    return runProcess(process.execPath, [localBin, file], { cwd: dir, timeout: EXECUTION_TIMEOUT });
                 }
                 // Fallback to npx if local binary not found
                 return runProcess("npx", ["tsx", file], { cwd: dir, timeout: EXECUTION_TIMEOUT });
