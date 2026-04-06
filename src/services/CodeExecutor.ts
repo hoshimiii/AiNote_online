@@ -3,6 +3,7 @@ import { mkdtemp, writeFile, rm } from "fs/promises";
 import { existsSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import * as ts from "typescript";
 
 export interface ExecutionResult {
     stdout: string;
@@ -152,28 +153,26 @@ export class LocalExecutor implements CodeExecutor {
                 return runProcess("node", [file], { cwd: dir, timeout: EXECUTION_TIMEOUT });
             }
             case "typescript": {
-                const file = join(dir, "main.ts");
-                await writeFile(file, code, "utf-8");
-                // Prefer local installed binary to avoid relying on `npx` at runtime (Vercel/CI may not have it)
-                const localBin = join(process.cwd(), "node_modules", ".bin", process.platform === "win32" ? "tsx.cmd" : "tsx");
-                if (existsSync(localBin)) {
-                    if (process.platform === "win32") {
-                        // Use cmd.exe so the .cmd wrapper runs in its intended shell
-                        return runProcess("cmd.exe", ["/c", localBin, file], { cwd: dir, timeout: EXECUTION_TIMEOUT });
-                    }
-                    // On Unix/Vercel: bypass the shell wrapper entirely.
-                    // Call tsx's CJS/ESM entry directly via the current node binary so we
-                    // never touch the shell script that causes EINVAL / SyntaxError.
-                    const tsxCli = join(process.cwd(), "node_modules", "tsx", "dist", "cli.mjs");
-                    if (existsSync(tsxCli)) {
-                        // Run tsx CLI entry directly as the Node.js main module
-                        return runProcess(process.execPath, [tsxCli, file], { cwd: dir, timeout: EXECUTION_TIMEOUT });
-                    }
-                    // Fallback: try tsx's legacy bin via node
-                    return runProcess(process.execPath, [localBin, file], { cwd: dir, timeout: EXECUTION_TIMEOUT });
+                // Transpile TS -> JS in-process using TypeScript's compiler API.
+                // This avoids spawning tsx/npx entirely and has no native binary requirements,
+                // making it compatible with Vercel serverless and other restricted environments.
+                let jsCode: string;
+                try {
+                    const result = ts.transpileModule(code, {
+                        compilerOptions: {
+                            module: ts.ModuleKind.CommonJS,
+                            target: ts.ScriptTarget.ES2020,
+                            strict: false,
+                            esModuleInterop: true,
+                        },
+                    });
+                    jsCode = result.outputText;
+                } catch (e: any) {
+                    return { stdout: "", stderr: `[TypeScript 编译错误]\n${e?.message ?? e}`, exitCode: 1, duration: 0 };
                 }
-                // Fallback to npx if local binary not found
-                return runProcess("npx", ["tsx", file], { cwd: dir, timeout: EXECUTION_TIMEOUT });
+                const jsFile = join(dir, "main.js");
+                await writeFile(jsFile, jsCode, "utf-8");
+                return runProcess("node", [jsFile], { cwd: dir, timeout: EXECUTION_TIMEOUT });
             }
             case "python": {
                 const file = join(dir, "main.py");

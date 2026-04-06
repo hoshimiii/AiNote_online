@@ -1,11 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Ensure tsx's dist is included in Vercel's serverless bundle.
-  // Required because tsx is invoked via child_process.spawn at runtime
-  // and Vercel's file tracer won't detect it automatically.
+  // Bundle TypeScript compiler for in-process TS transpilation at runtime.
+  // Required because tsx is no longer used; we call ts.transpileModule() directly.
   outputFileTracingIncludes: {
-    "/api/execute": ["./node_modules/tsx/**/*"],
+    "/api/execute": ["./node_modules/typescript/**/*"],
   },
 };
 
