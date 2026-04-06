@@ -18,14 +18,16 @@ datasource db {
 // - passwordHash 存储 bcrypt 哈希后的密码，绝对不能存明文
 // - snapshot 是一对一关联，每个用户只有一份看板快照
 model User {
-  id           String             @id @default(cuid())
-  email        String             @unique
-  name         String?
-  passwordHash String
-  mcpApiKey    String?            @unique
-  createdAt    DateTime           @default(now())
-  updatedAt    DateTime           @updatedAt
-  snapshot     WorkspaceSnapshot?
+  id                   String               @id @default(cuid())
+  email                String               @unique
+  name                 String?
+  passwordHash         String
+  mcpApiKey            String?              @unique
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  snapshot             WorkspaceSnapshot?
+  conversationMemories ConversationMemory[]
+  noteEmbeddings       NoteEmbedding[]
 }
 
 // WorkspaceSnapshot 表：存储用户的全量看板状态（JSON 快照）
@@ -39,4 +41,39 @@ model WorkspaceSnapshot {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   data      Json
   updatedAt DateTime @updatedAt
+}
+
+// ConversationMemory 表：存储已压缩的历史对话记忆向量
+// - content 保存原始对话文本，summary 保存 LLM 压缩摘要
+// - embedding 使用 pgvector vector(1024) 类型（需提前安装 pgvector 扩展）
+// - 通过余弦距离（<=>）进行语义相似度检索
+// - 注意：Prisma 不原生支持 vector 类型，所有向量读写必须用 $queryRaw / $executeRaw
+model ConversationMemory {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessionId String
+  content   String
+  summary   String
+  embedding Unsupported("vector(1024)")?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([sessionId])
+}
+
+// NoteEmbedding 表：存储笔记块的向量，供 RAG 检索
+// - noteId 对应 Zustand WorkSpace 中的 note 标识
+// - blockContent 是笔记块的原始文本内容
+model NoteEmbedding {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  noteId       String
+  blockContent String
+  embedding    Unsupported("vector(1024)")?
+  createdAt    DateTime @default(now())
+
+  @@index([userId])
+  @@index([noteId])
 }
