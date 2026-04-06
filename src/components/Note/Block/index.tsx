@@ -9,6 +9,7 @@ import { python } from "@codemirror/lang-python";
 import { cpp } from "@codemirror/lang-cpp";
 import { java } from "@codemirror/lang-java";
 import type { Extension } from "@codemirror/state";
+import { Divide } from "lucide-react";
 
 const SUPPORTED_LANGUAGES = [
     { value: "javascript", label: "JavaScript" },
@@ -56,7 +57,7 @@ const CodeToolbar = ({
             disabled={isRunning}
             title="运行代码"
             aria-label="运行代码"
-            className="relative z-10 flex items-center gap-2 px-3 py-1 text-sm rounded-md bg-indigo-600 text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:opacity-60 disabled:bg-indigo-400 transition-shadow shadow-sm"
+            className="relative z-10 text-black-500 flex items-center gap-2 px-3 py-1 text-sm rounded-md bg-indigo-600 text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:opacity-60 disabled:bg-indigo-400 transition-shadow shadow-sm"
         >
             {isRunning ? (
                 <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
@@ -68,6 +69,7 @@ const CodeToolbar = ({
             )}
             <span className="ml-0.5">{isRunning ? "运行中..." : "运行"}</span>
         </button>
+        <div></div> #布局用
     </div>
 );
 
