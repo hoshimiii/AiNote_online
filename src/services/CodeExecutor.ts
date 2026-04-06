@@ -1,5 +1,6 @@
 import { execFile, spawn } from "child_process";
 import { mkdtemp, writeFile, rm } from "fs/promises";
+import { existsSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
@@ -153,6 +154,18 @@ export class LocalExecutor implements CodeExecutor {
             case "typescript": {
                 const file = join(dir, "main.ts");
                 await writeFile(file, code, "utf-8");
+                // Prefer local installed binary to avoid relying on `npx` at runtime (Vercel/CI may not have it)
+                const localBin = join(process.cwd(), "node_modules", ".bin", process.platform === "win32" ? "tsx.cmd" : "tsx");
+                if (existsSync(localBin)) {
+                    // On Unix use `node <bin>` to avoid EINVAL when the bin isn't executable.
+                    // On Windows, run via cmd.exe /c to execute the `.cmd` wrapper reliably.
+                    if (process.platform === "win32") {
+                        // Use cmd.exe so the .cmd wrapper runs in its intended shell
+                        return runProcess("cmd.exe", ["/c", localBin, file], { cwd: dir, timeout: EXECUTION_TIMEOUT });
+                    }
+                    return runProcess(process.execPath, [localBin, file], { cwd: dir, timeout: EXECUTION_TIMEOUT });
+                }
+                // Fallback to npx if local binary not found
                 return runProcess("npx", ["tsx", file], { cwd: dir, timeout: EXECUTION_TIMEOUT });
             }
             case "python": {
