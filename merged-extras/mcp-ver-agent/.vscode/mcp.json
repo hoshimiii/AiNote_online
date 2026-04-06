@@ -1,0 +1,22 @@
+{
+	"servers": {
+		// "ainote-bridge": {
+		// 	"type": "stdio",
+		// 	"command": "npx",
+		// 	"args": [
+		// 		"tsx",
+		// 		"E:\\codes\\AiNote\\AiNote_online\\mcp-bridge\\bridge-server.ts"
+		// 	],
+		// 	"env": {}
+		// },
+		"ainote-mcp-server-2824e905": {
+			"type": "stdio",
+			"command": "npx",
+			"args": [
+				"tsx",
+				"E:\\codes\\AiNote\\AiNote_online\\mcp-bridge\\bridge-server.ts"
+			]
+		}
+	},
+	"inputs": []
+}
