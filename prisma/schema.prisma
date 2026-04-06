@@ -5,7 +5,11 @@
 // 3. generator 决定生成什么客户端（这里是 Node.js 用的 @prisma/client）。
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  // Only include engine binaries for the current machine (local dev) and
+  // Vercel's serverless environment (Amazon Linux / rhel-openssl-3.0.x).
+  // This removes binaries for macOS, Windows, Debian, etc. and cuts ~60 MB.
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
 datasource db {

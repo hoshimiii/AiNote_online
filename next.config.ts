@@ -21,6 +21,19 @@ const HEAVY_EXCLUDES = [
   "./node_modules/onnxruntime-node/**/*",
   "./node_modules/faiss-node/**/*",
   "./node_modules/canvas/**/*",
+  // ESLint + TypeScript ESLint plugins – dev-only tools, ~158 MB total, never needed at runtime
+  "./node_modules/eslint/**/*",
+  "./node_modules/eslint-*/**/*",
+  "./node_modules/@eslint/**/*",
+  "./node_modules/@eslint-community/**/*",
+  "./node_modules/@typescript-eslint/**/*",
+  "./node_modules/cosmiconfig/**/*",
+  "./node_modules/jiti/**/*",
+  "./node_modules/glob/**/*",
+  "./node_modules/globals/**/*",
+  // Prisma CLI & engines for non-Linux platforms (Vercel uses rhel-openssl-3.0.x)
+  "./node_modules/.pnpm/@prisma+engines*/**/*",
+  "./node_modules/prisma/**/*",
 ];
 
 const nextConfig: NextConfig = {
