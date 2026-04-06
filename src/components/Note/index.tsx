@@ -154,12 +154,6 @@ export const Note = ({ note, activeMissionId, scrollToBlockId }: { note: NoteTyp
         <div className="p-4">
             <div className="flex justify-between items-baseline mb-4">
                 <h3 className="text-lg font-semibold">{note?.noteTitle}</h3>
-                <Button variant="ghost" size="sm"
-                    onClick={handleSave}
-                    className="px-3 py-1 bg-blue-50 rounded hover:bg-blue-600"
-                >
-                    保存
-                </Button>
                 <LinkTaskDialog
                     note={note}
                     activeMissionId={activeMissionId}
