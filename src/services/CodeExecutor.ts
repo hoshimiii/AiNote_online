@@ -163,7 +163,9 @@ export class LocalExecutor implements CodeExecutor {
                         // Use cmd.exe so the .cmd wrapper runs in its intended shell
                         return runProcess("cmd.exe", ["/c", localBin, file], { cwd: dir, timeout: EXECUTION_TIMEOUT });
                     }
-                    return runProcess(process.execPath, [localBin, file], { cwd: dir, timeout: EXECUTION_TIMEOUT });
+                    // On Unix, the `.bin/tsx` is a shell wrapper. Execute it via `sh -c` so
+                    // the shell script runs (instead of asking node to parse the script).
+                    return runProcess("sh", ["-c", `${localBin} ${file}`], { cwd: dir, timeout: EXECUTION_TIMEOUT });
                 }
                 // Fallback to npx if local binary not found
                 return runProcess("npx", ["tsx", file], { cwd: dir, timeout: EXECUTION_TIMEOUT });
