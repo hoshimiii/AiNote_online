@@ -34,13 +34,11 @@ const HEAVY_EXCLUDES = [
   // Prisma CLI & engines for non-Linux platforms (Vercel uses rhel-openssl-3.0.x)
   "./node_modules/.pnpm/@prisma+engines*/**/*",
   "./node_modules/prisma/**/*",
+  // TypeScript compiler – no longer needed at runtime (TS execution removed)
+  "./node_modules/typescript/**/*",
 ];
 
 const nextConfig: NextConfig = {
-  outputFileTracingIncludes: {
-    // Bundle TypeScript compiler for in-process TS transpilation at runtime.
-    "/api/execute": ["./node_modules/typescript/**/*"],
-  },
   outputFileTracingExcludes: {
     // Apply exclusions to every route
     "*": HEAVY_EXCLUDES,

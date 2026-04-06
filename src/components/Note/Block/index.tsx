@@ -13,7 +13,6 @@ import { Divide } from "lucide-react";
 
 const SUPPORTED_LANGUAGES = [
     { value: "javascript", label: "JavaScript" },
-    { value: "typescript", label: "TypeScript" },
     // { value: "python", label: "Python" },
     // { value: "cpp", label: "C++" },
     // { value: "java", label: "Java" },
@@ -22,7 +21,6 @@ const SUPPORTED_LANGUAGES = [
 function getLanguageExtension(lang?: string): Extension[] {
     switch (lang) {
         case "javascript": return [javascript()];
-        case "typescript": return [javascript({ typescript: true })];
         case "python": return [python()];
         case "cpp": return [cpp()];
         case "java": return [java()];

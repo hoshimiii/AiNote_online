@@ -3,7 +3,6 @@ import { mkdtemp, writeFile, rm } from "fs/promises";
 import { existsSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import * as ts from "typescript";
 
 export interface ExecutionResult {
     stdout: string;
@@ -17,7 +16,7 @@ export interface CodeExecutor {
     supportedLanguages(): string[];
 }
 
-const SUPPORTED_LANGUAGES = ["javascript", "typescript", "python", "cpp", "java"] as const;
+const SUPPORTED_LANGUAGES = ["javascript", "python", "cpp", "java"] as const;
 export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number];
 
 const MAX_CODE_SIZE = 64 * 1024; // 64KB
@@ -134,7 +133,7 @@ export class LocalExecutor implements CodeExecutor {
 
         const wrapForEntry = (lang: SupportedLanguage, src: string) => {
             if (!safeEntry) return src;
-            if (lang === "javascript" || lang === "typescript") {
+            if (lang === "javascript") {
                 const argsJson = JSON.stringify(args ?? []);
                 return `${src}\n;(async () => {\n  try {\n    const __ainote_args = ${argsJson};\n    let fn;\n    try { fn = eval("${safeEntry}"); } catch (e) { fn = undefined; }\n    if (typeof fn === 'function') {\n      const res = await fn(...__ainote_args);\n      console.log(JSON.stringify({__AINOTE_RESULT__: res}));\n    } else {\n      console.log(JSON.stringify({__AINOTE_RESULT__: null}));\n    }\n  } catch (e) {\n    console.error(e);\n    process.exit(1);\n  }\n})();\n`;
             }
@@ -151,28 +150,6 @@ export class LocalExecutor implements CodeExecutor {
                 const file = join(dir, "main.js");
                 await writeFile(file, code, "utf-8");
                 return runProcess("node", [file], { cwd: dir, timeout: EXECUTION_TIMEOUT });
-            }
-            case "typescript": {
-                // Transpile TS -> JS in-process using TypeScript's compiler API.
-                // This avoids spawning tsx/npx entirely and has no native binary requirements,
-                // making it compatible with Vercel serverless and other restricted environments.
-                let jsCode: string;
-                try {
-                    const result = ts.transpileModule(code, {
-                        compilerOptions: {
-                            module: ts.ModuleKind.CommonJS,
-                            target: ts.ScriptTarget.ES2020,
-                            strict: false,
-                            esModuleInterop: true,
-                        },
-                    });
-                    jsCode = result.outputText;
-                } catch (e: any) {
-                    return { stdout: "", stderr: `[TypeScript 编译错误]\n${e?.message ?? e}`, exitCode: 1, duration: 0 };
-                }
-                const jsFile = join(dir, "main.js");
-                await writeFile(jsFile, jsCode, "utf-8");
-                return runProcess("node", [jsFile], { cwd: dir, timeout: EXECUTION_TIMEOUT });
             }
             case "python": {
                 const file = join(dir, "main.py");
