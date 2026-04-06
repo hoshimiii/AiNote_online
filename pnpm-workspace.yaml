@@ -1,0 +1,7 @@
+packages:
+  - .
+  - mcp-bridge
+
+ignoredBuiltDependencies:
+  - sharp
+  - unrs-resolver
