@@ -10,7 +10,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { generateEmbedding } from "@/services/EmbeddingService";
+import { generateEmbedding, summarizeDialogueForEmbedding } from "@/services/EmbeddingService";
 import type { LLMConfig } from "@/api/llm";
 
 export const dynamic = "force-dynamic";
@@ -21,44 +21,7 @@ interface StoreBody {
     config: LLMConfig;
 }
 
-/** 调用 LLM 生成对话摘要（非流式，简单 POST） */
-async function summarizeMessages(
-    messages: { role: string; content: string }[],
-    config: LLMConfig
-): Promise<string> {
-    const dialogue = messages
-        .map((m) => `${m.role === "user" ? "用户" : "助手"}: ${m.content}`)
-        .join("\n");
-
-    const summaryPrompt = [
-        { role: "system", content: "你是一个对话摘要助手，请用不超过 200 字的中文总结以下对话的核心内容和结论。" },
-        { role: "user", content: dialogue },
-    ];
-
-    const baseurl = config.baseurl.replace(/\/chat\/completions$/, "").replace(/\/$/, "");
-    const res = await fetch(`${baseurl}/chat/completions`, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${config.usertoken}`,
-        },
-        body: JSON.stringify({
-            model: config.model,
-            messages: summaryPrompt,
-            stream: false,
-            max_tokens: 300,
-        }),
-    });
-
-    if (!res.ok) {
-        throw new Error(`Summary LLM error ${res.status}`);
-    }
-
-    const json = (await res.json()) as {
-        choices: Array<{ message: { content: string } }>;
-    };
-    return json.choices?.[0]?.message?.content?.trim() ?? dialogue.slice(0, 200);
-}
+// 使用 services/EmbeddingService.summa rizeDialogueForEmbedding 生成用于嵌入的摘要/代码说明
 
 export async function POST(req: Request) {
     const session = await auth();
@@ -85,10 +48,9 @@ export async function POST(req: Request) {
         .join("\n");
 
     try {
-        const [summary, embedding] = await Promise.all([
-            summarizeMessages(messages, config),
-            generateEmbedding(content, config),
-        ]);
+        // 先生成用于向量化的摘要/代码说明，再对该摘要做 embedding（避免将原始代码内容直接嵌入）
+        const summary = await summarizeDialogueForEmbedding(messages, config);
+        const embedding = await generateEmbedding(summary, config);
 
         const embeddingStr = `[${embedding.join(",")}]`;
         const id = crypto.randomUUID();

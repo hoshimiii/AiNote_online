@@ -8,7 +8,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { generateEmbedding } from "@/services/EmbeddingService";
+import { generateEmbedding, summarizeTextForEmbedding } from "@/services/EmbeddingService";
 import type { LLMConfig } from "@/api/llm";
 
 export const dynamic = "force-dynamic";
@@ -70,17 +70,20 @@ export async function POST(req: Request) {
         if (!Array.isArray(note.blocks)) continue;
         const noteId = note.noteId ?? note.noteTitle ?? "unknown";
         for (const block of note.blocks) {
-            const text = block.blockContent?.trim();
-            if (!text || text.length < 10) continue;
+            const raw = block.blockContent?.trim();
+            if (!raw || raw.length < 10) continue;
 
             try {
-                const embedding = await generateEmbedding(text, body.config);
+                // 若 block 包含代码，先让 LLM 生成该代码的自然语言说明/摘要，再对说明做 embedding；
+                // 否则直接对文本做摘要并嵌入。这样向量库中不会存储原始代码片段。
+                const desc = await summarizeTextForEmbedding(raw, body.config).catch(() => raw);
+                const embedding = await generateEmbedding(desc, body.config);
                 const embeddingStr = `[${embedding.join(",")}]`;
                 const id = crypto.randomUUID();
 
                 await prisma.$executeRaw`
                     INSERT INTO "NoteEmbedding" (id, "userId", "noteId", "blockContent", embedding, "createdAt")
-                    VALUES (${id}, ${userId}, ${noteId}, ${text}, ${embeddingStr}::vector, NOW())
+                    VALUES (${id}, ${userId}, ${noteId}, ${desc}, ${embeddingStr}::vector, NOW())
                 `;
                 embedded++;
             } catch {

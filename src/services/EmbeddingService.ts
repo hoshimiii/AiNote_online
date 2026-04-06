@@ -72,3 +72,55 @@ export async function generateEmbeddings(texts: string[], config: LLMConfig): Pr
 function baseurl_is_siliconflow(baseurl: string): boolean {
     return baseurl.includes("siliconflow");
 }
+
+/**
+ * 将任意文本或代码转换为用于嵌入的自然语言说明。
+ * - 若包含代码块（``` 或 類似代码标记），返回一段中文说明：代码做什么、输入输出、注意点（不包含原代码）。
+ * - 否则返回一段不超过 200 字的中文摘要用于向量化。
+ */
+export async function summarizeTextForEmbedding(text: string, config: LLMConfig, maxTokens = 300): Promise<string> {
+    const baseurl = config.baseurl.replace(/\/chat\/completions$/, "").replace(/\/$/, "");
+    const endpoint = `${baseurl}/chat/completions`;
+
+    const hasCodeFence = /```|<code>|function\s+\w+\(|=>|\{\s*\n/.test(text);
+
+    const systemPrompt = hasCodeFence
+        ? "你是一个精通多种编程语言的助理。下面给出的文本可能包含代码，请用中文用一段不超过200字的话清楚地描述：这段代码的用途、主要逻辑、输入输出和使用时需要注意的点。不要返回原始代码，只返回自然语言说明。"
+        : "你是一个文本摘要助手。请用中文用一段不超过200字的话总结以下文本的核心含义，便于后续做语义检索。不要包含原文重复内容。";
+
+    const body = {
+        model: config.model,
+        messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: text },
+        ],
+        stream: false,
+        max_tokens: maxTokens,
+    };
+
+    const res = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${config.usertoken}`,
+        },
+        body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new Error(`Summarize API error ${res.status}: ${txt}`);
+    }
+
+    const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    const out = json.choices?.[0]?.message?.content?.trim();
+    return out && out.length > 0 ? out : text.slice(0, 200);
+}
+
+export async function summarizeDialogueForEmbedding(
+    messages: { role: string; content: string }[],
+    config: LLMConfig
+): Promise<string> {
+    const dialogue = messages.map((m) => `${m.role === "user" ? "用户" : "助手"}: ${m.content}`).join("\n");
+    return summarizeTextForEmbedding(dialogue, config, 300);
+}

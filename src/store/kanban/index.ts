@@ -36,6 +36,11 @@ export type Block = {
     linkedBoardId?: string;
     linkedTaskId?: string;
     linkedSubTaskId?: string;
+    language?: string;
+    executionOutput?: string;
+    executionError?: string;
+    executionExitCode?: number;
+    executionTimestamp?: string;
 }
 
 export type Board = {
@@ -881,7 +886,7 @@ export const useWorkSpace = create<WorkSpaceProps>()(
         }),
         {
             name: 'workspace-storage',
-            version: 5,
+            version: 6,
             skipHydration: true, // ZustandRehydrate 组件会在客户端手动触发 rehydrate()
             migrate: (persistedState: any, version: number) => {
                 let state = persistedState;
@@ -932,6 +937,19 @@ export const useWorkSpace = create<WorkSpaceProps>()(
                         boards,
                         tasks,
                     };
+                }
+                if (version < 6) {
+                    const missions = state.missions || {};
+                    Object.keys(missions).forEach(missionId => {
+                        (missions[missionId].Notes || []).forEach((note: any) => {
+                            (note.blocks || []).forEach((block: any) => {
+                                if (block.blockType === 'code' && !block.language) {
+                                    block.language = 'javascript';
+                                }
+                            });
+                        });
+                    });
+                    state = { ...state, missions };
                 }
                 return state;
             }

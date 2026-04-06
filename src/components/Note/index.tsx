@@ -193,6 +193,7 @@ export const Note = ({ note, activeMissionId, scrollToBlockId }: { note: NoteTyp
                             block={block}
                             content={localContents[block.blockId] ?? block.blockContent}
                             onChange={(content) => handleBlockChange(block.blockId, content)}
+                            onUpdateBlock={(updates) => updateBlock(note, block.blockId, { ...block, ...updates })}
                         />
                         <div className="absolute top-2 right-2 flex gap-0.5 items-center opacity-0 group-hover/block:opacity-100 transition-opacity">
                             <select
@@ -260,7 +261,8 @@ export const Note = ({ note, activeMissionId, scrollToBlockId }: { note: NoteTyp
                             blockType: 'code',
                             blockContent: '',
                             blockCreatedAt: new Date().toISOString(),
-                            blockUpdatedAt: new Date().toISOString()
+                            blockUpdatedAt: new Date().toISOString(),
+                            language: 'javascript',
                         })}
                     >
                         <PlusIcon className="w-3 h-3 mr-1" /> Code
