@@ -48,7 +48,7 @@ async function forwardWithPolicy(
       } else {
         console.log("[mcp-bridge]", JSON.stringify(obj))
       }
-    } catch (e) {
+    } catch {
       console.log("[mcp-bridge]", obj)
     }
   }
@@ -93,8 +93,8 @@ async function forwardWithPolicy(
     } catch (e: unknown) {
       clearTimeout(id)
       lastErr = e
-      const isAbort = (e as any)?.name === "AbortError"
-      log("warn", { event: "forward.attempt_error", toolName, attempt, isAbort, message: String((e as any)?.message ?? e) })
+      const isAbort = (e as Error)?.name === "AbortError"
+      log("warn", { event: "forward.attempt_error", toolName, attempt, isAbort, message: String((e as Error)?.message ?? e) })
       if (attempt >= retries) throw e
       // small backoff
       await new Promise((r) => setTimeout(r, 200 * (attempt + 1)))
@@ -104,6 +104,15 @@ async function forwardWithPolicy(
 }
 
 const mcpServer = new McpServer({ name: "ainote-bridge", version: "0.1.0" })
+
+mcpServer.registerTool(
+  "list_workspaces",
+  {
+    description: "List workspaces",
+    inputSchema: {},
+  },
+  async (args) => forward("list_workspaces", args as Record<string, unknown>),
+)
 
 mcpServer.registerTool(
   "list_missions",
@@ -239,14 +248,13 @@ mcpServer.registerTool(
     },
   },
   async (args) => {
-    // 在内部定义默认工程参数
     const defaultOpts = {
       timeoutMs: 30000,
       retries: 2,
-      logLevel: "info" as const
-    };
-    return forwardWithPolicy("organize_wrong_answers", args as Record<string, unknown>, defaultOpts);
-  },
+      logLevel: "info" as const,
+    }
+    return handleOrganizeWrongAnswers(args as Record<string, unknown>, defaultOpts)
+  }
 )
 
 // Skill: 上传 docs 笔记到云端（来自 mcp-bridge/skills/upload-docs-to-ainote.prompt.md）
@@ -269,44 +277,61 @@ mcpServer.registerTool(
     },
   },
   async (args) => {
-    const opts = (args as any)?.options
-    return forwardWithPolicy("upload_docs_to_ainote", args as Record<string, unknown>, opts)
+    const typedArgs = args as Record<string, unknown>
+    const opts = typedArgs.options as { timeoutMs?: number; retries?: number; logLevel?: "info" | "warn" | "error" } | undefined
+    return handleUploadDocs(typedArgs, opts)
   },
 )
 
 async function callTool(toolName: string, args: Record<string, unknown>, opts?: { timeoutMs?: number; retries?: number; logLevel?: "info" | "warn" | "error" }) {
   const res = await forwardWithPolicy(toolName, args, opts)
   try {
-    const text = (res as any)?.content?.[0]?.text
+    const text = res.content[0]?.text
     if (!text) return null
-    return JSON.parse(text)
-  } catch (e) {
-    return (res as any)?.content?.[0]?.text ?? null
+    return JSON.parse(text) as unknown
+  } catch {
+    return res.content[0]?.text ?? null
   }
 }
 
-function resolveId(obj: any, prefer?: string[]) {
-  if (!obj) return undefined
-  if (typeof obj === "string") return obj
-  const candidates = prefer ?? ["id", "missionId", "noteId", "resultId"]
-  for (const k of candidates) if (obj[k]) return obj[k]
-  // try common fields
-  if (obj?.mission?.id) return obj.mission.id
-  if (obj?.note?.id) return obj.note.id
+async function resolveWorkspaceId(
+  providedId: string | undefined,
+  opts?: { timeoutMs?: number; retries?: number; logLevel?: "info" | "warn" | "error" },
+): Promise<string | undefined> {
+  if (providedId) return providedId
+  const workspaces = (await callTool("list_workspaces", {}, opts)) as unknown[] | null
+  if (Array.isArray(workspaces) && workspaces.length > 0) {
+    return resolveId(workspaces[0], ["id", "workspaceId"])
+  }
   return undefined
 }
 
-async function handleUploadDocs(args: Record<string, any>, opts?: { timeoutMs?: number; retries?: number; logLevel?: "info" | "warn" | "error" }) {
+function resolveId(obj: unknown, prefer?: string[]): string | undefined {
+  if (!obj) return undefined
+  if (typeof obj === "string") return obj
+  const rec = obj as Record<string, unknown>
+  const candidates = prefer ?? ["id", "missionId", "noteId", "resultId"]
+  for (const k of candidates) if (rec[k]) return rec[k] as string
+  // try common fields
+  if ((rec.mission as Record<string, unknown> | undefined)?.id) return (rec.mission as Record<string, unknown>).id as string
+  if ((rec.note as Record<string, unknown> | undefined)?.id) return (rec.note as Record<string, unknown>).id as string
+  return undefined
+}
+
+async function handleUploadDocs(args: Record<string, unknown>, opts?: { timeoutMs?: number; retries?: number; logLevel?: "info" | "warn" | "error" }) {
   const docsPath = args.docsPath ? path.resolve(args.docsPath as string) : path.join(__dirname, "..", "docs")
-  const missionTitle = args.missionTitle || "项目文档"
-  const workspaceId = args.workspaceId
+  const missionTitle = (args.missionTitle as string | undefined) ?? "项目文档"
+  const workspaceId = await resolveWorkspaceId(args.workspaceId as string | undefined, opts)
   const log = (obj: unknown) => console.info("[mcp-bridge][upload_docs]", JSON.stringify(obj))
 
   // list missions
-  const missions = (await callTool("list_missions", { workspaceId }, opts)) as any[] | null
-  let mission = null
+  const missions = (await callTool("list_missions", { workspaceId }, opts)) as unknown[] | null
+  let mission: unknown = null
   if (Array.isArray(missions)) {
-    mission = missions.find((m: any) => m?.title === missionTitle || m?.name === missionTitle)
+    mission = missions.find((m: unknown) => {
+      const r = m as Record<string, unknown>
+      return r?.title === missionTitle || r?.name === missionTitle
+    })
   }
   if (!mission) {
     log({ event: "mission_not_found", missionTitle })
@@ -326,7 +351,7 @@ async function handleUploadDocs(args: Record<string, any>, opts?: { timeoutMs?: 
     throw new Error(`failed to read docsPath ${docsPath}: ${String(e)}`)
   }
 
-  const summary: Array<{ file: string; noteResult?: any; error?: string }> = []
+  const summary: Array<{ file: string; noteResult?: unknown; error?: string }> = []
   for (const f of files) {
     try {
       const content = await fsp.readFile(path.join(docsPath, f), "utf8")
@@ -337,26 +362,31 @@ async function handleUploadDocs(args: Record<string, any>, opts?: { timeoutMs?: 
         opts,
       )
       summary.push({ file: f, noteResult: noteRes })
-    } catch (e: any) {
+    } catch (e: unknown) {
       summary.push({ file: f, error: String(e) })
     }
   }
 
-  return { missionId, uploaded: summary }
+  return {
+    content: [{ type: "text" as const, text: JSON.stringify({ missionId, uploaded: summary }, null, 2) }],
+  }
 }
 
 // Skill: 整理错题到云端（orchestrator）
-async function handleOrganizeWrongAnswers(args: Record<string, any>, opts?: { timeoutMs?: number; retries?: number; logLevel?: "info" | "warn" | "error" }) {
+async function handleOrganizeWrongAnswers(args: Record<string, unknown>, opts?: { timeoutMs?: number; retries?: number; logLevel?: "info" | "warn" | "error" }) {
   const content = args.content
   if (!content) throw new Error("content is required")
-  const missionTitle = (args.missionTitle as string) || "错题整理"
-  const workspaceId = args.workspaceId
+  const missionTitle = (args.missionTitle as string | undefined) ?? "错题整理"
+  const workspaceId = await resolveWorkspaceId(args.workspaceId as string | undefined, opts)
   const log = (obj: unknown) => console.info("[mcp-bridge][organize_wrong_answers]", JSON.stringify(obj))
 
-  const missions = (await callTool("list_missions", { workspaceId }, opts)) as any[] | null
-  let mission = null
+  const missions = (await callTool("list_missions", { workspaceId }, opts)) as unknown[] | null
+  let mission: unknown = null
   if (Array.isArray(missions)) {
-    mission = missions.find((m: any) => m?.title === missionTitle || m?.name === missionTitle)
+    mission = missions.find((m: unknown) => {
+      const r = m as Record<string, unknown>
+      return r?.title === missionTitle || r?.name === missionTitle
+    })
   }
   if (!mission) {
     log({ event: "mission_not_found", missionTitle })
@@ -369,10 +399,12 @@ async function handleOrganizeWrongAnswers(args: Record<string, any>, opts?: { ti
 
   // For simplicity: create a single note containing the provided content. The full per-question splitting
   // and subtask creation described in the skill prompt can be implemented later.
-  const noteTitle = (args.options && args.options.noteTitle) || `错题 - ${new Date().toISOString()}`
+  const noteTitle = `错题 - ${new Date().toISOString()}`
   const blocks = [{ blockType: "markdown", blockContent: String(content) }]
   const noteRes = await callTool("create_note", { missionId, noteTitle, blocks }, opts)
-  return { missionId, noteRes }
+  return {
+    content: [{ type: "text" as const, text: JSON.stringify({ missionId, noteRes }, null, 2) }],
+  }
 }
 async function main() {
   const transport = new StdioServerTransport()

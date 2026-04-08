@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "postinstall": "prisma generate --schema=./prisma/schema.prisma",
+    "postinstall": "prisma generate",
     "dev": "next dev",
-    "build": "prisma migrate deploy --schema=./prisma/schema.prisma && next build",
+    "build": "prisma migrate deploy && next build",
     "start": "next start",
     "lint": "eslint"
   },

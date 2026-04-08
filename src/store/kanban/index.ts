@@ -119,7 +119,8 @@ interface WorkSpaceProps {
     createWorkSpace: (WorkSpace: WorkSpace) => void,
     setWorkSpace: (WorkSpaceId: string | null) => void,
     deleteWorkSpace: (WorkSpaceId: string) => void,
-    RenameWorkSpace: (WorkSpaceId: string, newName: string) => void
+    RenameWorkSpace: (WorkSpaceId: string, newName: string) => void,    
+    getWorkSpaces: () => WorkSpace[],
 
     createMission: (Mission: Mission) => void,
     setMission: (MissionId: string | null) => void,
@@ -312,6 +313,10 @@ export const useWorkSpace = create<WorkSpaceProps>()(
                 }));
             },
 
+            getWorkSpaces: () => {
+                const state = get();
+                return state.workspaces;
+            },
 
             createMission: (mission) => {
                 set((state) => {
