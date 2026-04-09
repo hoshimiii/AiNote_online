@@ -14,8 +14,13 @@
 			"command": "npx",
 			"args": [
 				"tsx",
-				"E:\\codes\\AiNote\\AiNote_online\\mcp-bridge\\bridge-server.ts"
-			]
+				"d:\\codes\\ydmd\\AiNote_online\\mcp-bridge\\bridge-server.ts"
+			],
+			"env": {
+				
+				"AINOTE_API_KEY": "ainote_30adfe36c49e2fff5f02bbca9e9fddb9b6dd15f88ace00b5420e47d8e34f9e30",
+				"VERCEL_API_URL": "https://ai-note-online-jyn5-pfn1mku1u-hoshimiiis-projects.vercel.app/api/mcp"
+			}
 		}
 	},
 	"inputs": []
