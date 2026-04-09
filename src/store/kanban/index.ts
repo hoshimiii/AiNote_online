@@ -99,6 +99,11 @@ export type MissionSnapshot = {
     }[],
 }
 
+type WorkSpaceSnapshot={
+    workspaceId: string,
+    workspaceName: string,
+}
+
 interface WorkSpaceProps {
     workspaces: WorkSpace[],
     activeWorkSpaceId: string | null,
@@ -120,7 +125,6 @@ interface WorkSpaceProps {
     setWorkSpace: (WorkSpaceId: string | null) => void,
     deleteWorkSpace: (WorkSpaceId: string) => void,
     RenameWorkSpace: (WorkSpaceId: string, newName: string) => void,    
-    getWorkSpaces: () => WorkSpace[],
 
     createMission: (Mission: Mission) => void,
     setMission: (MissionId: string | null) => void,
@@ -170,6 +174,7 @@ interface WorkSpaceProps {
     setCloudSyncTime: (time: string) => void,
 
     getCurrentContext: () => CurrentContextSnapshot,
+    getWorkSpaceSnapshot: () => WorkSpaceSnapshot | null,
     getMissionSnapshot: (missionId: string) => MissionSnapshot | null,
     getCurrentMissionSnapshot: () => MissionSnapshot | null,
     getNoteSnapshot: (noteId: string) => NoteSnapshot | null,
@@ -313,9 +318,15 @@ export const useWorkSpace = create<WorkSpaceProps>()(
                 }));
             },
 
-            getWorkSpaces: () => {
+            getWorkSpaceSnapshot: () => {
                 const state = get();
-                return state.workspaces;
+                if (!state.activeWorkSpaceId) return null;
+                const workspace = state.workspaces.find(w => w.workspaceId === state.activeWorkSpaceId);
+                if (!workspace) return null;
+                return {
+                    workspaceId: workspace.workspaceId,
+                    workspaceName: workspace.workspaceName,
+                };
             },
 
             createMission: (mission) => {

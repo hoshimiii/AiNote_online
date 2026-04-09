@@ -48,5 +48,6 @@ next-env.d.ts
 /scripts/
 
 # mcp
+.vscode/mcp.json
 /mcp-bridge/node_modules
 /mcp-bridge/.env

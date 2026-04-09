@@ -10,6 +10,11 @@ dotenv.config({ path: path.join(__dirname, ".env") })
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import * as z from "zod/v4"
 
+/** 所有日志强制写 stderr，防止污染 MCP stdio JSON-RPC 的 stdout 通道 */
+function mlog(tag: string, obj: unknown) {
+  process.stderr.write(`[mcp-bridge][${tag}] ${JSON.stringify(obj)}\n`)
+}
+
 const blockInput = z.object({
   blockType: z.string().optional(),
   blockContent: z.string().optional(),
@@ -40,18 +45,7 @@ async function forwardWithPolicy(
   const retries = opts?.retries ?? 0
   const logLevel = opts?.logLevel ?? "info"
 
-  const log = (level: string, obj: unknown) => {
-    try {
-      const fn = console[level as keyof Console] || console.log
-      if (typeof fn === "function") {
-        (fn as (...args: unknown[]) => void).call(console, "[mcp-bridge]", JSON.stringify(obj))
-      } else {
-        console.log("[mcp-bridge]", JSON.stringify(obj))
-      }
-    } catch {
-      console.log("[mcp-bridge]", obj)
-    }
-  }
+  const log = (level: string, obj: unknown) => mlog(level, obj)
 
   let lastErr: unknown = null
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -322,7 +316,7 @@ async function handleUploadDocs(args: Record<string, unknown>, opts?: { timeoutM
   const docsPath = args.docsPath ? path.resolve(args.docsPath as string) : path.join(__dirname, "..", "docs")
   const missionTitle = (args.missionTitle as string | undefined) ?? "项目文档"
   const workspaceId = await resolveWorkspaceId(args.workspaceId as string | undefined, opts)
-  const log = (obj: unknown) => console.info("[mcp-bridge][upload_docs]", JSON.stringify(obj))
+  const log = (obj: unknown) => mlog("upload_docs", obj)
 
   // list missions
   const missions = (await callTool("list_missions", { workspaceId }, opts)) as unknown[] | null
@@ -378,7 +372,7 @@ async function handleOrganizeWrongAnswers(args: Record<string, unknown>, opts?: 
   if (!content) throw new Error("content is required")
   const missionTitle = (args.missionTitle as string | undefined) ?? "错题整理"
   const workspaceId = await resolveWorkspaceId(args.workspaceId as string | undefined, opts)
-  const log = (obj: unknown) => console.info("[mcp-bridge][organize_wrong_answers]", JSON.stringify(obj))
+  const log = (obj: unknown) => mlog("organize_wrong_answers", obj)
 
   const missions = (await callTool("list_missions", { workspaceId }, opts)) as unknown[] | null
   let mission: unknown = null

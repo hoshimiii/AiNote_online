@@ -242,6 +242,11 @@ export async function dispatch(
   args: Record<string, unknown>,
 ): Promise<unknown> {
   switch (toolName) {
+    case "list_workspaces":
+      return readSnapshot(userId, (state) => {
+        const workspaces = state.workspaces as { workspaceId: string; workspaceName: string }[]
+        return workspaces.map((w) => ({ workspaceId: w.workspaceId, workspaceName: w.workspaceName }))
+      })
     case "list_missions":
       return readSnapshot(userId, (state) => listMissionsImpl(state, args.workspaceId as string | undefined))
     case "list_boards":
