@@ -1,4 +1,4 @@
-import { useWorkSpace, type Note as NoteType } from "@/store/kanban";
+import { useWorkSpace, type Note as NoteType, type Mission } from "@/store/kanban";
 import { useState, useEffect, useRef } from "react";
 import { Button } from "../ui/button";
 import { DeleteDialog } from "../items/DeleteDialog";
@@ -55,13 +55,13 @@ export const Note = ({ note, activeMissionId, scrollToBlockId }: { note: NoteTyp
     const { missions, boards, boardOrder, updateNote, createBlock, insertBlock, deleteBlock, updateBlock, setLinkedNoteIds, linkBlock, addSubTask, updataBoard } = useWorkSpace();
     const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    const [localContents, setLocalContents] = useState<Record<string, string>>(
-        () => Object.fromEntries(note?.blocks?.map(b => [b.blockId, b.blockContent]) ?? [])
-    );
-
-    useEffect(() => {
-        setLocalContents(Object.fromEntries(note?.blocks?.map(b => [b.blockId, b.blockContent]) ?? []));
-    }, [note?.noteId]);
+    const [localContents, setLocalContents] = useState<Record<string, string>>(() => {
+        const initial: Record<string, string> = {};
+        note?.blocks?.forEach(b => {
+            initial[b.blockId] = b.blockContent;
+        });
+        return initial;
+    });
 
     useEffect(() => {
         if (!scrollToBlockId) return;
@@ -75,16 +75,12 @@ export const Note = ({ note, activeMissionId, scrollToBlockId }: { note: NoteTyp
     }, [scrollToBlockId]);
 
     useEffect(() => {
-        setLocalContents(prev => {
-            const next = { ...prev };
-            note?.blocks?.forEach(b => {
-                if (!(b.blockId in next)) {
-                    next[b.blockId] = b.blockContent;
-                }
-            });
-            return next;
+        const next: Record<string, string> = {};
+        note?.blocks?.forEach(b => {
+            next[b.blockId] = b.blockContent;
         });
-    }, [note?.blocks]);
+            setLocalContents(next);
+    }, [note?.blocks, localContents]);
 
     const handleBlockChange = (blockId: string, content: string) => {
         setLocalContents(prev => ({ ...prev, [blockId]: content }));

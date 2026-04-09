@@ -5,7 +5,7 @@ import { type Note as NoteType, type Task } from "@/store/kanban";
 
 interface Mission {
     MissionId: string;
-    [key: string]: string | number | boolean | object | undefined;
+    [key: string]: string | number | boolean | object | undefined | null;
 }
 
 interface Board {
@@ -34,7 +34,7 @@ export const LinkTaskDialog = ({
     const [open, setOpen] = useState(false);
     const [selectedTaskId, setSelectedTaskId] = useState<string>(note?.relatedTaskId ?? "");
 
-    const currentMission = missions[activeMissionId];
+    const currentMission = missions?.[activeMissionId];
     if (!currentMission) return null;
 
     const allTasks: Task[] = [];
