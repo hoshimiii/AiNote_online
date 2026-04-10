@@ -74,13 +74,13 @@ export const Note = ({ note, activeMissionId, scrollToBlockId }: { note: NoteTyp
         }
     }, [scrollToBlockId]);
 
-    useEffect(() => {
-        const next: Record<string, string> = {};
-        note?.blocks?.forEach(b => {
-            next[b.blockId] = b.blockContent;
-        });
-            setLocalContents(next);
-    }, [note?.blocks, localContents]);
+    // useEffect(() => {
+    //     const next: Record<string, string> = {};
+    //     note?.blocks?.forEach(b => {
+    //         next[b.blockId] = b.blockContent;
+    //     });
+    //         setLocalContents(next);
+    // }, [note?.noteId]);
 
     const handleBlockChange = (blockId: string, content: string) => {
         setLocalContents(prev => ({ ...prev, [blockId]: content }));
@@ -120,13 +120,13 @@ export const Note = ({ note, activeMissionId, scrollToBlockId }: { note: NoteTyp
         return () => {
             if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
         };
-    }, [localContents, note.blocks, note.noteId, activeMissionId, updateNote]);
+    }, [localContents, note, activeMissionId, updateNote]);
 
     const orderedBoardIds = boardOrder[activeMissionId] ?? [];
     const boardMap = Object.fromEntries(
-        Object.values(boards).filter((b: any) => b.MissionId === activeMissionId).map((b: any) => [b.BoardId, b])
+        Object.values(boards).filter((b) => b.MissionId === activeMissionId).map((b) => [b.BoardId, b])
     );
-    const allBoards = [...(orderedBoardIds.map((id: string) => boardMap[id]).filter(Boolean)), ...Object.values(boards).filter((b: any) => b.MissionId === activeMissionId && !orderedBoardIds.includes(b.BoardId))];
+    const allBoards = [...(orderedBoardIds.map((id: string) => boardMap[id]).filter(Boolean)), ...Object.values(boards).filter((b) => b.MissionId === activeMissionId && !orderedBoardIds.includes(b.BoardId))];
 
     const handleLinkTask = (note: NoteType | null, taskId: string | null) => {
         if (!note) return;
@@ -183,12 +183,12 @@ export const Note = ({ note, activeMissionId, scrollToBlockId }: { note: NoteTyp
                             block={block}
                             content={localContents[block.blockId] ?? block.blockContent}
                             onChange={(content) => handleBlockChange(block.blockId, content)}
-                            onUpdateBlock={(updates) => updateBlock(note, block.blockId, { ...block, ...updates })}
+                            onUpdateBlock={(updates) => updateBlock(activeMissionId, note, block.blockId, { ...block, ...updates })}
                         />
                         <div className="absolute top-2 right-2 flex gap-0.5 items-center opacity-0 group-hover/block:opacity-100 transition-opacity">
                             <select
                                 value={block.blockType}
-                                onChange={(e) => updateBlock(note, block.blockId, { ...block, blockType: e.target.value })}
+                                onChange={(e) => updateBlock(activeMissionId, note, block.blockId, { ...block, blockType: e.target.value })}
                                 className="h-6 px-1.5 text-xs border rounded bg-background cursor-pointer"
                                 onClick={(e) => e.stopPropagation()}
                             >
@@ -202,7 +202,7 @@ export const Note = ({ note, activeMissionId, scrollToBlockId }: { note: NoteTyp
                             currentSubTaskId={block.linkedSubTaskId ?? ""}
                             onConfirm={(boardId, taskId, subTaskId) => linkBlock(activeMissionId, note.noteId, block.blockId, boardId, taskId, subTaskId)}
                             onCreateTask={(boardId) => {
-                                const board = allBoards.find((b: any) => b.BoardId === boardId);
+                                const board = allBoards.find((b) => b.BoardId === boardId);
                                 if (board) {
                                     const newTaskId = generateRandomId();
                                     updataBoard(boardId, [...board.Tasks, { TaskId: newTaskId, title: 'New Task', linkedNoteIds: '', subTasks: [] }]);
@@ -219,7 +219,7 @@ export const Note = ({ note, activeMissionId, scrollToBlockId }: { note: NoteTyp
                         <DeleteDialog
                             title="确定要删除这个块吗?"
                             description="此操作将永久删除块及其所有关联的任务数据。"
-                            onConfirm={() => deleteBlock(note, block.blockId)}
+                            onConfirm={() => deleteBlock(activeMissionId, note, block.blockId)}
                             trigger={<Button variant="ghost" size="icon" className="cursor-pointer h-6 w-6 text-red-400 hover:text-red-600 hover:bg-red-50"><TrashIcon className="w-3 h-3" /></Button>}
                         />
                         </div>

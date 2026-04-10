@@ -830,7 +830,7 @@ const tools: Tool[] = [
             const mission = state.missions[noteSnapshot.missionId];
             const noteEntity = mission.Notes.find((item) => item.noteId === note.noteId);
             if (!noteEntity) throw new Error(`Note ${note.noteId} not found`);
-            state.RenameBlock(noteEntity, block.blockId, input.content);
+            state.RenameBlock(mission.MissionId, noteEntity, block.blockId, input.content);
             return JSON.stringify({ ...block, content: input.content });
         },
     },
@@ -866,7 +866,7 @@ const tools: Tool[] = [
                 ...(typeof input.blockType !== "undefined" ? { blockType: input.blockType } : {}),
                 ...(typeof input.content !== "undefined" ? { blockContent: input.content } : {}),
             };
-            state.updateBlock(noteEntity, block.blockId, nextBlock);
+            state.updateBlock(mission.MissionId, noteEntity, block.blockId, nextBlock);
             return JSON.stringify({ ...block, noteId: note.noteId, blockType: input.blockType, content: input.content });
         },
     },
@@ -923,7 +923,7 @@ const tools: Tool[] = [
             const mission = state.missions[noteSnapshot.missionId];
             const noteEntity = mission.Notes.find((item) => item.noteId === note.noteId);
             if (!noteEntity) throw new Error(`Note ${note.noteId} not found`);
-            state.deleteBlock(noteEntity, block.blockId);
+            state.deleteBlock(mission.MissionId, noteEntity, block.blockId);
             return JSON.stringify(block);
         },
     },

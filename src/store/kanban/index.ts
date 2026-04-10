@@ -1,3 +1,4 @@
+import { JsonArray } from '@prisma/client/runtime/library';
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
@@ -57,7 +58,7 @@ export type Task = {
     subTasks: SubTask[],
 }
 
-type WorkSpace = {
+export type WorkSpace = {
     workspaceId: string,
     workspaceName: string,
 }
@@ -99,12 +100,12 @@ export type MissionSnapshot = {
     }[],
 }
 
-type WorkSpaceSnapshot={
+export type WorkSpaceSnapshot = {
     workspaceId: string,
     workspaceName: string,
 }
 
-interface WorkSpaceProps {
+export interface WorkSpaceProps {
     workspaces: WorkSpace[],
     activeWorkSpaceId: string | null,
     activeMissionId: string | null,
@@ -167,9 +168,9 @@ interface WorkSpaceProps {
 
     createBlock: (note: Note, newBlock: Block) => Block,
     insertBlock: (note: Note, index: number, newBlock: Block) => Block,
-    deleteBlock: (note: Note, blockId: string) => void,
-    RenameBlock: (note: Note, blockId: string, newName: string) => void,
-    updateBlock: (note: Note, blockId: string, newBlock: Block) => void,
+    deleteBlock: (missionId: string, note: Note, blockId: string) => void,
+    RenameBlock: (missionId: string, note: Note, blockId: string, newName: string) => void,
+    updateBlock: (missionId: string, note: Note, blockId: string, newBlock: Block) => void,
 
     setCloudSyncTime: (time: string) => void,
 
@@ -196,17 +197,47 @@ const getBlockPreview = (content: string) => {
     return text.length > 80 ? text.slice(0, 80) : text;
 };
 
-const getOrderedBoards = (state: any, missionId: string) => {
+/**
+ * 获取指定 Mission 下已排序的 Board 列表。
+ *
+ * 【为什么是外部纯函数而非 store 方法】
+ * 此函数仅作为 buildMissionSnapshotFromState 的内部步骤，
+ * 通过接收已有的 state 快照避免额外的 get() 调用。
+ * 如果改写为 store 方法并在内部调用 get()，
+ * 调用方（buildMissionSnapshotFromState）就需要再多调一次 get()，
+ * 造成两次快照获取，不如共享同一个 state 参数来得高效。
+ *
+ * 【排序逻辑】
+ * 优先按 boardOrder[missionId] 中记录的 BoardId 顺序排列（用户手动拖拽的顺序）；
+ * 未出现在排序列表中的 Board（如旧数据迁移场景）会追加到末尾作为 fallback。
+ */
+const getOrderedBoards = (state: WorkSpaceProps, missionId: string) => {
     const orderedBoardIds = state.boardOrder[missionId] ?? [];
     const boardMap = Object.fromEntries(
-        Object.values(state.boards).filter((b: any) => b.MissionId === missionId).map((b: any) => [b.BoardId, b])
+        Object.values(state.boards).filter((b: Board) => b.MissionId === missionId).map((b: Board) => [b.BoardId, b])
     );
     const orderedBoards = orderedBoardIds.map((id: string) => boardMap[id]).filter(Boolean);
-    const fallbackBoards = Object.values(state.boards).filter((b: any) => b.MissionId === missionId && !orderedBoardIds.includes(b.BoardId));
+    const fallbackBoards = Object.values(state.boards).filter((b: Board) => b.MissionId === missionId && !orderedBoardIds.includes(b.BoardId));
     return [...orderedBoards, ...fallbackBoards];
 };
 
-const buildNoteSnapshotFromState = (state: any, noteId: string): NoteSnapshot | null => {
+/**
+ * 从 state 快照构建指定笔记的完整快照（NoteSnapshot）。
+ *
+ * 【为什么是外部纯函数而非 store 方法】
+ * 此函数同时被 getNoteSnapshot 和 buildNoteBlocksFromState 复用。
+ * 两者的调用方（getCurrentNoteSnapshot、getCurrentNoteBlocks）均只调用一次 get()
+ * 并将结果作为 state 参数传入，确保整次派生计算基于同一个一致的状态快照。
+ * 若改写为 store 方法互调（get().getNoteSnapshot()），则会产生多次 get()，
+ * 且 buildNoteBlocksFromState 也无法再复用同一个 state 对象。
+ *
+ * 【查找方式】
+ * 笔记存储在各 Mission 的 Notes 数组中，没有全局 noteId → Mission 的索引，
+ * 因此需要遍历所有 Mission 查找。找到后额外附加：
+ *  - index：Block 在笔记中的位置（0-based）
+ *  - preview：由 getBlockPreview 生成的内容摘要文本
+ */
+const buildNoteSnapshotFromState = (state: WorkSpaceProps, noteId: string): NoteSnapshot | null => {
     for (const missionId of Object.keys(state.missions || {})) {
         const mission = state.missions[missionId];
         const note = (mission.Notes || []).find((item: Note) => item.noteId === noteId);
@@ -226,11 +257,34 @@ const buildNoteSnapshotFromState = (state: any, noteId: string): NoteSnapshot | 
     return null;
 };
 
-const buildNoteBlocksFromState = (state: any, noteId: string): NoteBlockSnapshot[] => {
+/**
+ * 获取指定笔记的所有 Block 快照列表。
+ *
+ * 复用 buildNoteSnapshotFromState 提取 blocks 字段，
+ * 避免重复实现相同的 Mission 遍历逻辑。
+ * 接收 state 参数而非内部调用 get()，
+ * 与调用方共享同一个状态快照（参见 buildNoteSnapshotFromState 的说明）。
+ */
+const buildNoteBlocksFromState = (state: WorkSpaceProps, noteId: string): NoteBlockSnapshot[] => {
     return buildNoteSnapshotFromState(state, noteId)?.blocks ?? [];
 };
 
-const buildMissionSnapshotFromState = (state: any, missionId: string): MissionSnapshot | null => {
+/**
+ * 从 state 快照构建指定 Mission 的完整快照（MissionSnapshot）。
+ *
+ * 【为什么是外部纯函数而非 store 方法】
+ * getMissionSnapshot 和 getCurrentMissionSnapshot 都需要此逻辑。
+ * getCurrentMissionSnapshot 只调用一次 get() 得到 state，
+ * 然后将 state 和 state.currentMissionId 一并传入，复用同一快照。
+ * 若改写为 getMissionSnapshot 内部直接调用 get()，
+ * 则 getCurrentMissionSnapshot 中就会出现两次 get() 调用。
+ *
+ * 【内容说明】
+ * - boards：通过 getOrderedBoards 保证有序，并在每个 Task 上附加 subTaskCount 字段
+ * - notes：简化为摘要形式（noteId/noteTitle/relatedTaskId/blockCount），
+ *   不包含 Block 内容，避免快照体积过大
+ */
+const buildMissionSnapshotFromState = (state: WorkSpaceProps, missionId: string): MissionSnapshot | null => {
     const mission = state.missions?.[missionId];
     if (!mission) return null;
     const boards = getOrderedBoards(state, missionId).map((board: Board) => ({
@@ -717,12 +771,8 @@ export const useWorkSpace = create<WorkSpaceProps>()(
                 });
                 return newBlock;
             },
-            deleteBlock: (note, blockId) => {
+            deleteBlock: (missionId, note, blockId) => {
                 set((state) => {
-                    const missionId = Object.keys(state.missions).find(id =>
-                        state.missions[id].Notes.some(n => n.noteId === note.noteId)
-                    );
-                    if (!missionId) return state;
                     const mission = state.missions[missionId];
                     return {
                         missions: {
@@ -739,12 +789,8 @@ export const useWorkSpace = create<WorkSpaceProps>()(
                     };
                 });
             },
-            RenameBlock: (note, blockId, newName) => {
+            RenameBlock: (missionId, note, blockId, newName) => {
                 set((state) => {
-                    const missionId = Object.keys(state.missions).find(id =>
-                        state.missions[id].Notes.some(n => n.noteId === note.noteId)
-                    );
-                    if (!missionId) return state;
                     const mission = state.missions[missionId];
                     return {
                         missions: {
@@ -761,12 +807,8 @@ export const useWorkSpace = create<WorkSpaceProps>()(
                     };
                 });
             },
-            updateBlock: (note, blockId, newBlock) => {
+            updateBlock: (missionId, note, blockId, newBlock) => {
                 set((state) => {
-                    const missionId = Object.keys(state.missions).find(id =>
-                        state.missions[id].Notes.some(n => n.noteId === note.noteId)
-                    );
-                    if (!missionId) return state;
                     const mission = state.missions[missionId];
                     return {
                         missions: {
@@ -900,32 +942,53 @@ export const useWorkSpace = create<WorkSpaceProps>()(
                     }));
             },
         }),
-        {
+                {
             name: 'workspace-storage',
             version: 6,
             skipHydration: true, // ZustandRehydrate 组件会在客户端手动触发 rehydrate()
-            migrate: (persistedState: any, version: number) => {
-                let state = persistedState;
+            migrate: (persistedState: unknown, version: number): WorkSpaceProps => {
+                // 把传入的 unknown 安全地转换为部分 WorkSpaceProps，再与默认数据合并以避免 undefined 访问
+                const incoming = (persistedState as Partial<WorkSpaceProps>) ?? {};
+
+                const defaultData: Partial<WorkSpaceProps> = {
+                    workspaces: [],
+                    activeWorkSpaceId: null,
+                    activeMissionId: null,
+                    currentMissionId: null,
+                    currentNoteId: null,
+                    previewMissionId: null,
+                    _cloudSyncTime: null,
+                    missionOrder: {},
+                    boardOrder: {},
+                    missions: {},
+                    boards: {},
+                    tasks: {},
+                };
+
+                // 合并（浅合并），后续迁移基于 stateObj
+                let stateObj = { ...defaultData, ...incoming } as Partial<WorkSpaceProps>;
+
+                // 为便于遍历，断言为可索引类型
+                const missions = (stateObj.missions || {}) as Record<string, Mission>;
+                const boards = (stateObj.boards || {}) as Record<string, Board>;
+                const tasks = (stateObj.tasks || {}) as Record<string, Task>;
+
                 if (version < 1) {
-                    const missions = state.missions || {};
                     Object.keys(missions).forEach(missionId => {
                         if (!missions[missionId].Notes) {
                             missions[missionId].Notes = [];
                         }
                     });
-                    state = { ...state, missions };
+                    stateObj = { ...stateObj, missions };
                 }
+
                 if (version < 5) {
-                    const missions = state.missions || {};
-                    const boards = state.boards || {};
-                    const tasks = state.tasks || {};
                     Object.keys(missions).forEach(missionId => {
                         if (missions[missionId].activeNoteId === undefined) {
-                            missions[missionId].activeNoteId = missions[missionId].activateNoteId ?? null;
+                            missions[missionId].activeNoteId = null;
                         }
-                        delete missions[missionId].activateNoteId;
-                        (missions[missionId].Notes || []).forEach((note: any) => {
-                            (note.blocks || []).forEach((block: any) => {
+                        (missions[missionId].Notes || []).forEach((note: Note) => {
+                            (note.blocks || []).forEach((block: Block) => {
                                 if (block.linkedBoardId === undefined) block.linkedBoardId = "";
                                 if (block.linkedTaskId === undefined) block.linkedTaskId = "";
                                 if (block.linkedSubTaskId === undefined) block.linkedSubTaskId = "";
@@ -933,7 +996,7 @@ export const useWorkSpace = create<WorkSpaceProps>()(
                         });
                     });
                     Object.keys(boards).forEach(boardId => {
-                        boards[boardId].Tasks = (boards[boardId].Tasks || []).map((task: any) => ({
+                        boards[boardId].Tasks = (boards[boardId].Tasks || []).map((task: Task) => ({
                             ...task,
                             subTasks: Array.isArray(task.subTasks) ? task.subTasks : [],
                         }));
@@ -944,31 +1007,34 @@ export const useWorkSpace = create<WorkSpaceProps>()(
                             subTasks: Array.isArray(tasks[taskId]?.subTasks) ? tasks[taskId].subTasks : [],
                         };
                     });
-                    state = {
-                        ...state,
-                        currentMissionId: state.currentMissionId ?? state.activeMissionId ?? null,
-                        currentNoteId: state.currentNoteId ?? null,
+                    stateObj = {
+                        ...stateObj,
+                        currentMissionId: stateObj.currentMissionId ?? stateObj.activeMissionId ?? null,
+                        currentNoteId: stateObj.currentNoteId ?? null,
                         previewMissionId: null,
                         missions,
                         boards,
                         tasks,
                     };
                 }
+
                 if (version < 6) {
-                    const missions = state.missions || {};
+                    // 使用明确类型替代 any
                     Object.keys(missions).forEach(missionId => {
-                        (missions[missionId].Notes || []).forEach((note: any) => {
-                            (note.blocks || []).forEach((block: any) => {
+                        (missions[missionId].Notes || []).forEach((note: Note) => {
+                            (note.blocks || []).forEach((block: Block) => {
                                 if (block.blockType === 'code' && !block.language) {
                                     block.language = 'javascript';
                                 }
                             });
                         });
                     });
-                    state = { ...state, missions };
+                    stateObj = { ...stateObj, missions };
                 }
-                return state;
+
+                // 返回时断言为 WorkSpaceProps，运行时 persist 存储的仅是数据部分，zustand 会把方法从初始 store 合并回来
+                return stateObj as WorkSpaceProps;
             }
         }
     )
-)
+);
