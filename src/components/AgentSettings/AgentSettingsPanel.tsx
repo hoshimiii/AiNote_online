@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter } from "@/components/ui/sheet";
 import { useChatbot } from "@/store/Chatbot";
 import type { LLMConfig } from "@/api/llm";
+import { McpApiKeyCard } from "@/components/settings/McpApiKeyCard";
 
 interface AgentSettingsPanelProps {
     open: boolean;
@@ -94,6 +95,7 @@ export const AgentSettingsPanel = ({ open, onOpenChange }: AgentSettingsPanelPro
                             placeholder="自定义规则，会追加到系统提示中..."
                         />
                     </div>
+                    <McpApiKeyCard />
                 </div>
                 <SheetFooter>
                     <Button variant="outline" className="cursor-pointer" onClick={() => onOpenChange(false)}>取消</Button>

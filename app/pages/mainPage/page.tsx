@@ -24,19 +24,23 @@ export const MainPage = (
                     </div>
                 ) : (
                     <>
-                        MISSIONID:{nowMissionId}
+                        {/* MISSIONID:{nowMissionId} */}
                         <div className="flex flex-wrap w-[80vw]">
                             <Board nowMissionId={nowMissionId ?? ''} setActiveNoteId={(noteId, blockId) => {
                                 setScrollToBlockId(blockId);
                                 setActiveNote(nowMissionId ?? '', noteId);
                                 router.push('/pages/workPage');
                             }} />
-                            <Button className="cursor-pointer" variant="outline" onClick={() => createBoard({
-                                BoardId: generateRandomId(),
-                                MissionId: nowMissionId ?? '',
-                                title: '未开始',
-                                Tasks: []
-                            })}>New Board</Button>
+                            <Button
+                                className="cursor-pointer ml-2 self-start mt-1 h-8 px-3 text-xs border-dashed text-muted-foreground hover:text-foreground hover:border-solid"
+                                variant="outline"
+                                onClick={() => createBoard({
+                                    BoardId: generateRandomId(),
+                                    MissionId: nowMissionId ?? '',
+                                    title: '未开始',
+                                    Tasks: []
+                                })}
+                            >+ New Board</Button>
                         </div>
                     </>
                 ) : (

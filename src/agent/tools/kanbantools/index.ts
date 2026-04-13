@@ -830,7 +830,7 @@ const tools: Tool[] = [
             const mission = state.missions[noteSnapshot.missionId];
             const noteEntity = mission.Notes.find((item) => item.noteId === note.noteId);
             if (!noteEntity) throw new Error(`Note ${note.noteId} not found`);
-            state.RenameBlock(noteEntity, block.blockId, input.content);
+            state.RenameBlock(mission.MissionId, noteEntity, block.blockId, input.content);
             return JSON.stringify({ ...block, content: input.content });
         },
     },
@@ -866,7 +866,7 @@ const tools: Tool[] = [
                 ...(typeof input.blockType !== "undefined" ? { blockType: input.blockType } : {}),
                 ...(typeof input.content !== "undefined" ? { blockContent: input.content } : {}),
             };
-            state.updateBlock(noteEntity, block.blockId, nextBlock);
+            state.updateBlock(mission.MissionId, noteEntity, block.blockId, nextBlock);
             return JSON.stringify({ ...block, noteId: note.noteId, blockType: input.blockType, content: input.content });
         },
     },
@@ -923,7 +923,7 @@ const tools: Tool[] = [
             const mission = state.missions[noteSnapshot.missionId];
             const noteEntity = mission.Notes.find((item) => item.noteId === note.noteId);
             if (!noteEntity) throw new Error(`Note ${note.noteId} not found`);
-            state.deleteBlock(noteEntity, block.blockId);
+            state.deleteBlock(mission.MissionId, noteEntity, block.blockId);
             return JSON.stringify(block);
         },
     },
@@ -957,6 +957,40 @@ const tools: Tool[] = [
             }
             state.linkBlock(note.missionId, note.noteId, block.blockId, task.boardId, task.taskId, subTaskId);
             return JSON.stringify({ noteId: note.noteId, blockId: block.blockId, boardId: task.boardId, taskId: task.taskId, subTaskId });
+        },
+    },
+    {
+        name: "rewrite_note",
+        description: "Replace ALL blocks in a note at once with new content. Use this for rewriting, reorganizing, or summarizing an entire note instead of updating blocks one by one. Each element in the blocks array becomes one block.",
+        parameters: z.object({
+            missionId: z.string().optional(),
+            missionTitle: z.string().optional(),
+            noteId: z.string().optional(),
+            noteTitle: z.string().optional(),
+            blocks: z.array(z.object({
+                blockType: z.enum(["markdown", "code"]).default("markdown"),
+                content: z.string(),
+            })).min(1),
+        }),
+        execute: async (raw) => {
+            const input = raw as NoteRefInput & { blocks: { blockType: "markdown" | "code"; content: string }[] };
+            const state = useWorkSpace.getState();
+            const noteRef = resolveNote(state, input);
+            const noteSnapshot = state.getNoteSnapshot(noteRef.noteId);
+            if (!noteSnapshot) throw new Error(`Note ${noteRef.noteId} not found`);
+            const mission = state.missions[noteSnapshot.missionId];
+            const noteEntity = mission.Notes.find((item) => item.noteId === noteRef.noteId);
+            if (!noteEntity) throw new Error(`Note ${noteRef.noteId} not found`);
+            const now = new Date().toISOString();
+            const newBlocks = input.blocks.map((b) => ({
+                blockId: generateRandomId(),
+                blockType: b.blockType ?? "markdown",
+                blockContent: b.content,
+                blockCreatedAt: now,
+                blockUpdatedAt: now,
+            }));
+            state.updateNote(noteSnapshot.missionId, noteRef.noteId, { ...noteEntity, blocks: newBlocks, noteUpdatedAt: now });
+            return JSON.stringify({ noteId: noteRef.noteId, noteTitle: noteRef.noteTitle, blocksWritten: newBlocks.length });
         },
     },
 ];

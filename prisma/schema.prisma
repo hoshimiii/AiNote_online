@@ -1,0 +1,83 @@
+// Prisma Schema — 核心知识点：
+// 1. Prisma 是一个类型安全的 ORM，通过 schema 文件定义数据模型，
+//    然后用 `prisma migrate` 把模型同步到数据库，并自动生成 TypeScript 类型。
+// 2. datasource 定义数据库连接，url 从环境变量读取，不要硬编码。
+// 3. generator 决定生成什么客户端（这里是 Node.js 用的 @prisma/client）。
+
+generator client {
+  provider      = "prisma-client-js"
+  // Only include engine binaries for the current machine (local dev) and
+  // Vercel's serverless environment (Amazon Linux / rhel-openssl-3.0.x).
+  // This removes binaries for macOS, Windows, Debian, etc. and cuts ~60 MB.
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql" // 使用 PostgreSQL，也可以换成 "mysql" 或 "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// User 表：存储注册用户
+// - id 用 cuid() 生成，比 autoincrement 更安全（不暴露顺序信息）
+// - passwordHash 存储 bcrypt 哈希后的密码，绝对不能存明文
+// - snapshot 是一对一关联，每个用户只有一份看板快照
+model User {
+  id                   String               @id @default(cuid())
+  email                String               @unique
+  name                 String?
+  passwordHash         String
+  mcpApiKey            String?              @unique
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  snapshot             WorkspaceSnapshot?
+  conversationMemories ConversationMemory[]
+  noteEmbeddings       NoteEmbedding[]
+}
+
+// WorkspaceSnapshot 表：存储用户的全量看板状态（JSON 快照）
+// - 采用"最后写入者胜"（Last-Write-Wins）策略，不做字段级 diff
+// - data 字段是 Json 类型，Prisma 6 会将其映射为 PostgreSQL 的 jsonb（可索引的二进制 JSON）
+// - updatedAt 自动更新，前端用它判断云端数据是否比本地新
+// - userId @unique 保证一个用户只有一条快照记录，upsert 安全
+model WorkspaceSnapshot {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  data      Json
+  updatedAt DateTime @updatedAt
+}
+
+// ConversationMemory 表：存储已压缩的历史对话记忆向量
+// - content 保存原始对话文本，summary 保存 LLM 压缩摘要
+// - embedding 使用 pgvector vector(1024) 类型（需提前安装 pgvector 扩展）
+// - 通过余弦距离（<=>）进行语义相似度检索
+// - 注意：Prisma 不原生支持 vector 类型，所有向量读写必须用 $queryRaw / $executeRaw
+model ConversationMemory {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessionId String
+  content   String
+  summary   String
+  embedding Unsupported("vector(1024)")?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([sessionId])
+}
+
+// NoteEmbedding 表：存储笔记块的向量，供 RAG 检索
+// - noteId 对应 Zustand WorkSpace 中的 note 标识
+// - blockContent 是笔记块的原始文本内容
+model NoteEmbedding {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  noteId       String
+  blockContent String
+  embedding    Unsupported("vector(1024)")?
+  createdAt    DateTime @default(now())
+
+  @@index([userId])
+  @@index([noteId])
+}
