@@ -22,6 +22,7 @@
 
 - JavaScript / TypeScript（via `tsx`）
 - Python
+- 以下语言支持需要通过docker安装[piston](https://github.com/engineer-man/piston)并进行相应配置
 - C++（via `g++`）
 - Java（via `javac` + `java`）
 
@@ -61,7 +62,7 @@
 ---
 
 ## 🚀 快速开始
-
+### 方法一
 ### 前置依赖
 
 - Node.js ≥ 18
@@ -110,6 +111,11 @@ pnpm dev
 
 访问 [http://localhost:3000](http://localhost:3000)，注册账号后即可使用。
 
+### 方法二
+
+    访问[vercel](https://ai-note-online-jyn5.vercel.app/)上部署好的内容
+
+    或者fork到自己仓库中在vercel部署
 ---
 
 ## 📁 项目结构
