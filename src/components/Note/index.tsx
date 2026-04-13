@@ -1,4 +1,4 @@
-import { useWorkSpace, type Note as NoteType } from "@/store/kanban";
+import { useWorkSpace, type Note as NoteType, type Mission } from "@/store/kanban";
 import { useState, useEffect, useRef } from "react";
 import { Button } from "../ui/button";
 import { DeleteDialog } from "../items/DeleteDialog";
@@ -25,7 +25,7 @@ export const NoteItem = ({ note, nowmission }: { note: NoteType, nowmission: str
         return () => window.removeEventListener('popstate', handlePopState);
     }, []);
     return (
-        <div className="flex flex-col gap-2 text-sm p-1 ml-2 h-4">
+        <div className="flex flex-col text-xs p-0.5 ml-1 h-auto leading-none">
             <div className="flex justify-between items-center">
                 {note.noteTitle}
                 <div className="flex items-end">
@@ -55,13 +55,13 @@ export const Note = ({ note, activeMissionId, scrollToBlockId }: { note: NoteTyp
     const { missions, boards, boardOrder, updateNote, createBlock, insertBlock, deleteBlock, updateBlock, setLinkedNoteIds, linkBlock, addSubTask, updataBoard } = useWorkSpace();
     const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    const [localContents, setLocalContents] = useState<Record<string, string>>(
-        () => Object.fromEntries(note?.blocks?.map(b => [b.blockId, b.blockContent]) ?? [])
-    );
-
-    useEffect(() => {
-        setLocalContents(Object.fromEntries(note?.blocks?.map(b => [b.blockId, b.blockContent]) ?? []));
-    }, [note?.noteId]);
+    const [localContents, setLocalContents] = useState<Record<string, string>>(() => {
+        const initial: Record<string, string> = {};
+        note?.blocks?.forEach(b => {
+            initial[b.blockId] = b.blockContent;
+        });
+        return initial;
+    });
 
     useEffect(() => {
         if (!scrollToBlockId) return;
@@ -74,17 +74,13 @@ export const Note = ({ note, activeMissionId, scrollToBlockId }: { note: NoteTyp
         }
     }, [scrollToBlockId]);
 
-    useEffect(() => {
-        setLocalContents(prev => {
-            const next = { ...prev };
-            note?.blocks?.forEach(b => {
-                if (!(b.blockId in next)) {
-                    next[b.blockId] = b.blockContent;
-                }
-            });
-            return next;
-        });
-    }, [note?.blocks]);
+    // useEffect(() => {
+    //     const next: Record<string, string> = {};
+    //     note?.blocks?.forEach(b => {
+    //         next[b.blockId] = b.blockContent;
+    //     });
+    //         setLocalContents(next);
+    // }, [note?.noteId]);
 
     const handleBlockChange = (blockId: string, content: string) => {
         setLocalContents(prev => ({ ...prev, [blockId]: content }));
@@ -124,13 +120,13 @@ export const Note = ({ note, activeMissionId, scrollToBlockId }: { note: NoteTyp
         return () => {
             if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
         };
-    }, [localContents, note.blocks, note.noteId, activeMissionId, updateNote]);
+    }, [localContents, note, activeMissionId, updateNote]);
 
     const orderedBoardIds = boardOrder[activeMissionId] ?? [];
     const boardMap = Object.fromEntries(
-        Object.values(boards).filter((b: any) => b.MissionId === activeMissionId).map((b: any) => [b.BoardId, b])
+        Object.values(boards).filter((b) => b.MissionId === activeMissionId).map((b) => [b.BoardId, b])
     );
-    const allBoards = [...(orderedBoardIds.map((id: string) => boardMap[id]).filter(Boolean)), ...Object.values(boards).filter((b: any) => b.MissionId === activeMissionId && !orderedBoardIds.includes(b.BoardId))];
+    const allBoards = [...(orderedBoardIds.map((id: string) => boardMap[id]).filter(Boolean)), ...Object.values(boards).filter((b) => b.MissionId === activeMissionId && !orderedBoardIds.includes(b.BoardId))];
 
     const handleLinkTask = (note: NoteType | null, taskId: string | null) => {
         if (!note) return;
@@ -154,12 +150,6 @@ export const Note = ({ note, activeMissionId, scrollToBlockId }: { note: NoteTyp
         <div className="p-4">
             <div className="flex justify-between items-baseline mb-4">
                 <h3 className="text-lg font-semibold">{note?.noteTitle}</h3>
-                <Button variant="ghost" size="sm"
-                    onClick={handleSave}
-                    className="px-3 py-1 bg-blue-50 rounded hover:bg-blue-600"
-                >
-                    保存
-                </Button>
                 <LinkTaskDialog
                     note={note}
                     activeMissionId={activeMissionId}
@@ -193,11 +183,12 @@ export const Note = ({ note, activeMissionId, scrollToBlockId }: { note: NoteTyp
                             block={block}
                             content={localContents[block.blockId] ?? block.blockContent}
                             onChange={(content) => handleBlockChange(block.blockId, content)}
+                            onUpdateBlock={(updates) => updateBlock(activeMissionId, note, block.blockId, { ...block, ...updates })}
                         />
                         <div className="absolute top-2 right-2 flex gap-0.5 items-center opacity-0 group-hover/block:opacity-100 transition-opacity">
                             <select
                                 value={block.blockType}
-                                onChange={(e) => updateBlock(note, block.blockId, { ...block, blockType: e.target.value })}
+                                onChange={(e) => updateBlock(activeMissionId, note, block.blockId, { ...block, blockType: e.target.value })}
                                 className="h-6 px-1.5 text-xs border rounded bg-background cursor-pointer"
                                 onClick={(e) => e.stopPropagation()}
                             >
@@ -211,7 +202,7 @@ export const Note = ({ note, activeMissionId, scrollToBlockId }: { note: NoteTyp
                             currentSubTaskId={block.linkedSubTaskId ?? ""}
                             onConfirm={(boardId, taskId, subTaskId) => linkBlock(activeMissionId, note.noteId, block.blockId, boardId, taskId, subTaskId)}
                             onCreateTask={(boardId) => {
-                                const board = allBoards.find((b: any) => b.BoardId === boardId);
+                                const board = allBoards.find((b) => b.BoardId === boardId);
                                 if (board) {
                                     const newTaskId = generateRandomId();
                                     updataBoard(boardId, [...board.Tasks, { TaskId: newTaskId, title: 'New Task', linkedNoteIds: '', subTasks: [] }]);
@@ -228,7 +219,7 @@ export const Note = ({ note, activeMissionId, scrollToBlockId }: { note: NoteTyp
                         <DeleteDialog
                             title="确定要删除这个块吗?"
                             description="此操作将永久删除块及其所有关联的任务数据。"
-                            onConfirm={() => deleteBlock(note, block.blockId)}
+                            onConfirm={() => deleteBlock(activeMissionId, note, block.blockId)}
                             trigger={<Button variant="ghost" size="icon" className="cursor-pointer h-6 w-6 text-red-400 hover:text-red-600 hover:bg-red-50"><TrashIcon className="w-3 h-3" /></Button>}
                         />
                         </div>
@@ -260,7 +251,8 @@ export const Note = ({ note, activeMissionId, scrollToBlockId }: { note: NoteTyp
                             blockType: 'code',
                             blockContent: '',
                             blockCreatedAt: new Date().toISOString(),
-                            blockUpdatedAt: new Date().toISOString()
+                            blockUpdatedAt: new Date().toISOString(),
+                            language: 'javascript',
                         })}
                     >
                         <PlusIcon className="w-3 h-3 mr-1" /> Code

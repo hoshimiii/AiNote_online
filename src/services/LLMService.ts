@@ -10,12 +10,15 @@ export async function* streamCompletion(
     const reader = response.body?.getReader();
     if (!reader) return;
     const decoder = new TextDecoder();
+    let carry = "";
 
     while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        for (const line of chunk.split("\n")) {
+        carry += decoder.decode(value, { stream: true });
+        const lines = carry.split("\n");
+        carry = lines.pop() ?? "";
+        for (const line of lines) {
             const trimmed = line.trim();
             if (!trimmed || trimmed === "data: [DONE]") continue;
             if (trimmed.startsWith("data: ")) {
@@ -27,6 +30,16 @@ export async function* streamCompletion(
                     // 忽略解析失败的碎片
                 }
             }
+        }
+    }
+    const tail = carry.trim();
+    if (tail.startsWith("data: ") && tail !== "data: [DONE]") {
+        try {
+            const json = JSON.parse(tail.slice(6));
+            const content: string = json.choices[0]?.delta?.content ?? "";
+            if (content) yield content;
+        } catch {
+            /* empty */
         }
     }
 }

@@ -3,11 +3,22 @@ import { Button } from "../ui/button";
 import { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../ui/dialog";
 import { type Note as NoteType, type Task } from "@/store/kanban";
 
+interface Mission {
+    MissionId: string;
+    [key: string]: string | number | boolean | object | undefined | null;
+}
+
+interface Board {
+    MissionId: string;
+    Tasks?: Task[];
+    [key: string]: string | Task[] | undefined | Record<string, unknown>;
+}
+
 interface LinkTaskDialogProps {
     note: NoteType;
     activeMissionId: string;
-    missions: Record<string, any>;
-    boards: Record<string, any>;
+    missions: Record<string, Mission>;
+    boards: Record<string, Board>;
     onConfirm: (note: NoteType | null, taskId: string | null) => void;
     trigger?: React.ReactNode;
 }
@@ -23,11 +34,11 @@ export const LinkTaskDialog = ({
     const [open, setOpen] = useState(false);
     const [selectedTaskId, setSelectedTaskId] = useState<string>(note?.relatedTaskId ?? "");
 
-    const currentMission = missions[activeMissionId];
+    const currentMission = missions?.[activeMissionId];
     if (!currentMission) return null;
 
     const allTasks: Task[] = [];
-    Object.values(boards).forEach((board: any) => {
+    Object.values(boards).forEach((board: Board) => {
         if (board.MissionId === activeMissionId && board.Tasks) {
             allTasks.push(...board.Tasks);
         }

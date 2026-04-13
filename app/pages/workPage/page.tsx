@@ -196,7 +196,6 @@ export const WorkPage = () => {
     const handleClicknote = (missionId: string, noteId: string) => {
         setMission(missionId);
         setActiveNote(missionId, noteId);
-        router.push('/pages/workPage');
     };
 
     return (
@@ -229,6 +228,18 @@ export const WorkPage = () => {
 
                             <SortableContext items={orderedMissions.map(m => m.MissionId)} strategy={verticalListSortingStrategy}>
                                 <SidebarMenu>
+                                    {orderedMissions.length === 0 && (
+                                        <div className="flex flex-col items-center justify-center py-8 gap-2 text-muted-foreground">
+                                            <p className="text-sm">还没有任何任务</p>
+                                            <Button variant="default" className="cursor-pointer" onClick={() => createMission({
+                                                MissionId: generateRandomId(),
+                                                activeNoteId: null,
+                                                WorkSpaceId: activeWorkSpaceId || '',
+                                                title: 'New Mission',
+                                                Notes: []
+                                            })}>创建第一个 Mission</Button>
+                                        </div>
+                                    )}
                                     {orderedMissions.map((mission) => (
                                         <SidebarMenuItem className="group/menu-item flex-col bg-gray-100 rounded-md p-1" key={mission.MissionId}>
                                             <div className="flex justify-between items-center">
@@ -237,8 +248,8 @@ export const WorkPage = () => {
                                                 </SidebarMenuButton>
                                                 <SidebarMenuAction asChild>
                                                     <DeleteDialog
-                                                        title="確定要刪除任務嗎?"
-                                                        description="此操作無法撤銷，相關數據將永久消失"
+                                                        title="确定要删除任务吗?"
+                                                        description="此操作无法撤销，相关数据将永久消失"
                                                         onConfirm={() => deleteMission(mission.MissionId)}
                                                         trigger={<Button variant="ghost" size="sm" className="cursor-pointer group-hover/menu-item:block hidden"><TrashIcon className="w-4 h-4 text-red-500" /></Button>} />
                                                 </SidebarMenuAction>
@@ -254,7 +265,7 @@ export const WorkPage = () => {
                                                 <SidebarMenuSub className="group/sub-menu-item flex-col bg-gray-200 rounded-md p-1 mt-1 h-fit" key={'notes'}>
                                                     <SidebarContent>
                                                         {mission.Notes?.map((note) => (
-                                                            <SidebarMenuItem key={note.noteId} className="h-5" onClick={() => handleClicknote(mission.MissionId, note.noteId)}>
+                                                            <SidebarMenuItem key={note.noteId} className="h-auto py-0.5" onClick={() => handleClicknote(mission.MissionId, note.noteId)}>
                                                                 <NoteItem note={note} nowmission={mission.MissionId} />
                                                             </SidebarMenuItem>
                                                         ))}
@@ -277,15 +288,6 @@ export const WorkPage = () => {
                                 </SidebarMenu>
                             </SortableContext>
 
-                            <Button className="cursor-pointer mt-2" variant="outline" onClick={() => {
-                                if (!currentMissionId) return;
-                                createBoard({
-                                    BoardId: generateRandomId(),
-                                    MissionId: currentMissionId,
-                                    title: 'New Board',
-                                    Tasks: [],
-                                });
-                            }}>Create New Board</Button>
                         </SidebarContent>
                         <SidebarFooter className="mt-auto">
                             <Button variant="ghost" size="icon" className="cursor-pointer" onClick={() => setSettingsOpen(true)}>

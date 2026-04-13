@@ -2,8 +2,107 @@ import { type Block as BlockType } from "@/store/kanban";
 import ReactMarkdown from "react-markdown";
 import rehypeKatex from "rehype-katex";
 import remarkMath from "remark-math";
-import { useState, useEffect, useRef, type ClipboardEvent } from "react";
+import { useState, useEffect, useRef, useMemo, type ClipboardEvent } from "react";
 import CodeMirror from "@uiw/react-codemirror";
+import { javascript } from "@codemirror/lang-javascript";
+import { python } from "@codemirror/lang-python";
+import { cpp } from "@codemirror/lang-cpp";
+import { java } from "@codemirror/lang-java";
+import type { Extension } from "@codemirror/state";
+import { Divide } from "lucide-react";
+
+const SUPPORTED_LANGUAGES = [
+    { value: "javascript", label: "JavaScript" },
+    // { value: "python", label: "Python" },
+    // { value: "cpp", label: "C++" },
+    // { value: "java", label: "Java" },
+] as const;
+
+function getLanguageExtension(lang?: string): Extension[] {
+    switch (lang) {
+        case "javascript": return [javascript()];
+        case "python": return [python()];
+        case "cpp": return [cpp()];
+        case "java": return [java()];
+        default: return [javascript()];
+    }
+}
+
+const CodeToolbar = ({
+    block,
+    isRunning,
+    onUpdateBlock,
+    onExecute,
+}: {
+    block: BlockType;
+    isRunning: boolean;
+    onUpdateBlock?: (updates: Partial<BlockType>) => void;
+    onExecute: () => void;
+}) => (
+    <div className="flex items-center py-1 bg-gray-50 border-b gap-3">
+        <select
+            value={block.language || "javascript"}
+            onChange={(e) => onUpdateBlock?.({ language: e.target.value })}
+            className="h-6 px-1.5 text-xs border rounded bg-white cursor-pointer"
+            onClick={(e) => e.stopPropagation()}
+        >
+            {SUPPORTED_LANGUAGES.map((l) => (
+                <option key={l.value} value={l.value}>{l.label}</option>
+            ))}
+        </select>
+        <button
+            onClick={(e) => { e.stopPropagation(); onExecute(); }}
+            disabled={isRunning}
+            title="运行代码"
+            aria-label="运行代码"
+            className="relative z-10 text-black-500 text-sm flex mr-auto items-center px-3 py-1 rounded-md bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:opacity-60 disabled:bg-indigo-400 transition-shadow shadow-sm"
+        >
+            {isRunning ? (
+                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+            ) : (
+                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
+            )}
+            <span className="ml-0.5">{isRunning ? "运行中..." : "运行"}</span>
+        </button>
+        <div></div>
+    </div>
+);
+
+const ExecutionOutput = ({ block, onClear }: { block: BlockType; onClear: () => void }) => {
+    const hasOutput = block.executionOutput || block.executionError || block.executionExitCode !== undefined;
+    if (!hasOutput) return null;
+
+    const isError = (block.executionExitCode ?? 0) !== 0;
+    return (
+        <div className="mt-1 border rounded text-sm font-mono">
+            <div className="flex items-center justify-between px-3 py-1 bg-gray-50 border-b text-xs text-gray-500">
+                <div className="flex items-center gap-2">
+                    <span className={`inline-block w-2 h-2 rounded-full ${isError ? "bg-red-500" : "bg-green-500"}`} />
+                    <span>退出码: {block.executionExitCode ?? 0}</span>
+                    {block.executionTimestamp && (
+                        <span>· {new Date(block.executionTimestamp).toLocaleTimeString()}</span>
+                    )}
+                </div>
+                <button onClick={onClear} className="text-gray-400 hover:text-red-500 transition-colors cursor-pointer">
+                    清除
+                </button>
+            </div>
+            {block.executionOutput && (
+                <pre className="px-3 py-2 whitespace-pre-wrap break-words text-gray-800 max-h-64 overflow-y-auto">
+                    {block.executionOutput}
+                </pre>
+            )}
+            {block.executionError && (
+                <pre className="px-3 py-2 whitespace-pre-wrap break-words text-red-600 bg-red-50 max-h-64 overflow-y-auto border-t">
+                    {block.executionError}
+                </pre>
+            )}
+        </div>
+    );
+};
 
 
 const inlineToMarkdown = (node: ChildNode): string => {
@@ -108,11 +207,24 @@ const htmlToMarkdown = (html: string): string => {
     return out.replace(/\n{3,}/g, "\n\n").trim();
 };
 
-export const Block = ({ block, content, onChange }: { block: BlockType, content: string, onChange: (content: string) => void }) => {
+export const Block = ({
+    block,
+    content,
+    onChange,
+    onUpdateBlock,
+}: {
+    block: BlockType;
+    content: string;
+    onChange: (content: string) => void;
+    onUpdateBlock?: (updates: Partial<BlockType>) => void;
+}) => {
     const [isEditing, setIsEditing] = useState(false);
+    const [isRunning, setIsRunning] = useState(false);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const previewRef = useRef<HTMLDivElement>(null);
     const pendingCursorRef = useRef<number>(content.length);
+
+    const langExtensions = useMemo(() => getLanguageExtension(block.language), [block.language]);
 
     useEffect(() => {
         if (!isEditing || !textareaRef.current) return;
@@ -157,6 +269,52 @@ export const Block = ({ block, content, onChange }: { block: BlockType, content:
         onChange(next);
     };
 
+    const handleExecute = async () => {
+        if (isRunning || block.blockType !== "code") return;
+        setIsRunning(true);
+        try {
+            const res = await fetch("/api/execute", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ code: content, language: block.language || "javascript" }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                onUpdateBlock?.({
+                    executionOutput: "",
+                    executionError: data.error || `HTTP ${res.status}`,
+                    executionExitCode: 1,
+                    executionTimestamp: new Date().toISOString(),
+                });
+            } else {
+                onUpdateBlock?.({
+                    executionOutput: data.stdout || "",
+                    executionError: data.stderr || "",
+                    executionExitCode: data.exitCode ?? 0,
+                    executionTimestamp: new Date().toISOString(),
+                });
+            }
+        } catch (err: any) {
+            onUpdateBlock?.({
+                executionOutput: "",
+                executionError: err?.message ?? "网络错误",
+                executionExitCode: 1,
+                executionTimestamp: new Date().toISOString(),
+            });
+        } finally {
+            setIsRunning(false);
+        }
+    };
+
+    const handleClearOutput = () => {
+        onUpdateBlock?.({
+            executionOutput: undefined,
+            executionError: undefined,
+            executionExitCode: undefined,
+            executionTimestamp: undefined,
+        });
+    };
+
     return (
         <>
 
@@ -196,13 +354,16 @@ export const Block = ({ block, content, onChange }: { block: BlockType, content:
                             );
                         case 'code':
                             return (
-                                <CodeMirror
-                                    value={content}
-                                    onClick={() => setIsEditing(true)}
-                                    onChange={(value) => onChange(value)}
-                                    // onBlur={() => setIsEditing(false)}
-                                    className="w-full field-sizing-content min-w-1 p-3 border rounded resize-none font-mono"
-                                />
+                                <div className="border rounded overflow-hidden">
+                                    <CodeToolbar block={block} isRunning={isRunning} onUpdateBlock={onUpdateBlock} onExecute={handleExecute} />
+                                    <CodeMirror
+                                        value={content}
+                                        onChange={(value) => onChange(value)}
+                                        extensions={langExtensions}
+                                        className="w-full field-sizing-content min-w-1"
+                                    />
+                                    <ExecutionOutput block={block} onClear={handleClearOutput} />
+                                </div>
                             );
                     }
                 })()
@@ -224,12 +385,15 @@ export const Block = ({ block, content, onChange }: { block: BlockType, content:
                             );
                         case 'code':
                             return (
-                                <div onBlur={() => setIsEditing(false)} className="min-h-12 border">
+                                <div className="border rounded overflow-hidden">
+                                    <CodeToolbar block={block} isRunning={isRunning} onUpdateBlock={onUpdateBlock} onExecute={handleExecute} />
                                     <CodeMirror
                                         value={content}
                                         onChange={(value) => onChange(value)}
-                                        className="w-full field-sizing-content min-w-1 p-3 border rounded resize-none font-mono"
+                                        extensions={langExtensions}
+                                        className="w-full field-sizing-content min-w-1"
                                     />
+                                    <ExecutionOutput block={block} onClear={handleClearOutput} />
                                 </div>
                             );
                         default:

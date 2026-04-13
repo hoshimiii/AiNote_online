@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { sliceContext, type LLMConfig, type ApiMessage } from "@/services/LLMService";
 import { runLangChainAgent } from "@/agent/langchain/runner";
+import { retrieveMemories, storeSession } from "@/services/MemoryManager";
 
 export type Message = {
     messageId: string;
@@ -113,11 +114,31 @@ export const useChatbot = create<ChatbotState>()(
                 const historyLines = get()
                     .messages
                     .filter((m) => m.role !== "assistant")
-                    .slice(-10)
+                    .slice(-30)
                     .map((m) => `${m.role}: ${m.messageContent}`);
+
+                // 语义检索相关历史记忆（失败时静默降级为空数组）
+                const relatedMemories = await retrieveMemories(input, get().config).catch(() => []);
 
                 try {
                     const answer = await runLangChainAgent(get().config, input, historyLines, {
+                        relatedMemories,
+                        onStreamDelta: (delta) => {
+                            set((state) => ({
+                                messages: state.messages.map((m) =>
+                                    m.messageId === botMsgId
+                                        ? { ...m, messageContent: m.messageContent + delta }
+                                        : m
+                                ),
+                            }));
+                        },
+                        onStreamReset: () => {
+                            set((state) => ({
+                                messages: state.messages.map((m) =>
+                                    m.messageId === botMsgId ? { ...m, messageContent: "" } : m
+                                ),
+                            }));
+                        },
                         onTrace: ({ step, phase, content }) => {
                             const title =
                                 phase === "thought"
@@ -148,6 +169,16 @@ export const useChatbot = create<ChatbotState>()(
                                 : m
                         ),
                     }));
+
+                    // 异步存储本轮对话到向量记忆库（不阻塞 UI）
+                    void storeSession(
+                        get().chatbotId,
+                        [
+                            { role: "user", content: input },
+                            { role: "assistant", content: answer },
+                        ],
+                        get().config
+                    );
                 } catch (e) {
                     let errMsg = e instanceof Error ? e.message : String(e);
                     if (/401/.test(errMsg)) {
