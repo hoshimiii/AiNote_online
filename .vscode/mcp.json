@@ -9,13 +9,14 @@
 		// 	],
 		// 	"env": {}
 		// },
-		"ainote-mcp-server-2824e905": {
+		"ainote-mcp-server": {
 			"type": "stdio",
 			"command": "npx",
 			"args": [
 				"tsx",
-				"E:\\codes\\AiNote\\AiNote_online\\mcp-bridge\\bridge-server.ts"
-			]
+				"E:\\codes\\AiNote\\AiNote_online_copy\\mcp-bridge\\bridge-server.ts"
+			],
+			"cwd": "E:\\codes\\AiNote\\AiNote_online_copy\\mcp-bridge"
 		}
 	},
 	"inputs": []
