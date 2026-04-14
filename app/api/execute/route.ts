@@ -1,10 +1,16 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { LocalExecutor, type CodeExecutor } from "@/services/CodeExecutor";
+import { SmartExecutor, type CodeExecutor } from "@/services/CodeExecutor";
 
 export const dynamic = "force-dynamic";
 
-const executor: CodeExecutor = new LocalExecutor();
+/**
+ * SmartExecutor 在模块加载时读取环境变量进行路由决策：
+ *   - PISTON_API_URL 指定 Piston 地址（本地 Docker 或自托管）
+ *   - VERCEL=1 时自动使用 https://emkc.org 公开 Piston API
+ *   - 未配置 Piston 时回退到 LocalExecutor（仅 JS 无需额外安装）
+ */
+const executor: CodeExecutor = new SmartExecutor();
 
 export async function POST(request: Request) {
     const session = await auth();

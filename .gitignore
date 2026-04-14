@@ -3,6 +3,7 @@
 # dependencies
 **/node_modules
 /mcp-bridge/node_modules
+/.vscode
 /.pnp
 .pnp.*
 .yarn/*
@@ -48,6 +49,6 @@ next-env.d.ts
 /scripts/
 
 # mcp
-.vscode/mcp.json
+.vscode
 /mcp-bridge/node_modules
 /mcp-bridge/.env

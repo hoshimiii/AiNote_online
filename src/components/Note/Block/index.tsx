@@ -9,17 +9,17 @@ import { python } from "@codemirror/lang-python";
 import { cpp } from "@codemirror/lang-cpp";
 import { java } from "@codemirror/lang-java";
 import type { Extension } from "@codemirror/state";
-import { Divide } from "lucide-react";
-
 const SUPPORTED_LANGUAGES = [
     { value: "javascript", label: "JavaScript" },
-    // { value: "python", label: "Python" },
-    // { value: "cpp", label: "C++" },
-    // { value: "java", label: "Java" },
+    { value: "typescript", label: "TypeScript" },
+    { value: "python", label: "Python" },
+    { value: "cpp", label: "C++" },
+    { value: "java", label: "Java" },
 ] as const;
 
 function getLanguageExtension(lang?: string): Extension[] {
     switch (lang) {
+        case "typescript": return [javascript({ typescript: true })];
         case "javascript": return [javascript()];
         case "python": return [python()];
         case "cpp": return [cpp()];
@@ -294,10 +294,10 @@ export const Block = ({
                     executionTimestamp: new Date().toISOString(),
                 });
             }
-        } catch (err: any) {
+        } catch (err: unknown) {
             onUpdateBlock?.({
                 executionOutput: "",
-                executionError: err?.message ?? "网络错误",
+                executionError: (err as Error)?.message ?? "网络错误",
                 executionExitCode: 1,
                 executionTimestamp: new Date().toISOString(),
             });
