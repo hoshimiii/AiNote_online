@@ -2,6 +2,9 @@ import { z } from "zod";
 import ToolExecutor, { type Tool } from "../toolExecutor";
 import { useWorkSpace } from "@/store/kanban";
 import { generateRandomId } from "@/components/utils/RandomGenerator";
+import { executeFormalKanbanCommandClient } from "@/services/kanbanCommandClient";
+import type { SyncBlock } from "@/lib/syncSnapshotIntegrity";
+import type { FormalKanbanCommand } from "@/lib/formalKanbanCommands";
 
 type KanbanState = ReturnType<typeof useWorkSpace.getState>;
 
@@ -149,6 +152,9 @@ const resolveBlock = (state: KanbanState, input: BlockRefInput) => {
     return pickOne(matches, "Block");
 };
 
+const executeFormalCommand = async (command: FormalKanbanCommand) =>
+    JSON.stringify(await executeFormalKanbanCommandClient(command));
+
 const tools: Tool[] = [
     {
         name: "get_current_context",
@@ -193,10 +199,8 @@ const tools: Tool[] = [
         }),
         execute: async (raw) => {
             const { workspaceName } = raw as { workspaceName: string };
-            const state = useWorkSpace.getState();
             const workspaceId = generateRandomId();
-            state.createWorkSpace({ workspaceId, workspaceName });
-            return JSON.stringify({ workspaceId, workspaceName });
+            return executeFormalCommand({ kind: "create_workspace", workspaceId, workspaceName });
         },
     },
     {
@@ -211,8 +215,7 @@ const tools: Tool[] = [
             const input = raw as WorkspaceRefInput & { newName: string };
             const state = useWorkSpace.getState();
             const workspace = resolveWorkspace(state, input, false);
-            state.RenameWorkSpace(workspace.workspaceId, input.newName);
-            return JSON.stringify({ workspaceId: workspace.workspaceId, workspaceName: input.newName });
+            return executeFormalCommand({ kind: "rename_workspace", workspaceId: workspace.workspaceId, newName: input.newName });
         },
     },
     {
@@ -225,8 +228,7 @@ const tools: Tool[] = [
         execute: async (raw) => {
             const state = useWorkSpace.getState();
             const workspace = resolveWorkspace(state, raw as WorkspaceRefInput, false);
-            state.deleteWorkSpace(workspace.workspaceId);
-            return JSON.stringify(workspace);
+            return executeFormalCommand({ kind: "delete_workspace", workspaceId: workspace.workspaceId });
         },
     },
     {
@@ -289,14 +291,7 @@ const tools: Tool[] = [
             const state = useWorkSpace.getState();
             const workspace = resolveWorkspace(state, input);
             const missionId = generateRandomId();
-            state.createMission({
-                MissionId: missionId,
-                WorkSpaceId: workspace.workspaceId,
-                activeNoteId: null,
-                title: input.title,
-                Notes: [],
-            });
-            return JSON.stringify({ missionId, workspaceId: workspace.workspaceId, title: input.title });
+            return executeFormalCommand({ kind: "create_mission", workspaceId: workspace.workspaceId, missionId, title: input.title });
         },
     },
     {
@@ -311,8 +306,7 @@ const tools: Tool[] = [
             const input = raw as MissionRefInput & { title: string };
             const state = useWorkSpace.getState();
             const missionId = resolveMissionId(state, input, false);
-            state.RenameMission(missionId, input.title);
-            return JSON.stringify({ missionId, title: input.title });
+            return executeFormalCommand({ kind: "rename_mission", missionId, newTitle: input.title });
         },
     },
     {
@@ -325,8 +319,7 @@ const tools: Tool[] = [
         execute: async (raw) => {
             const state = useWorkSpace.getState();
             const missionId = resolveMissionId(state, raw as MissionRefInput, false);
-            state.deleteMission(missionId);
-            return JSON.stringify({ missionId });
+            return executeFormalCommand({ kind: "delete_mission", missionId });
         },
     },
     {
@@ -418,16 +411,8 @@ const tools: Tool[] = [
             const input = raw as MissionRefInput & { title: string };
             const state = useWorkSpace.getState();
             const missionId = resolveMissionId(state, input);
-            const note = state.createNote(missionId, {
-                noteId: generateRandomId(),
-                noteTitle: input.title,
-                noteContent: "",
-                noteCreatedAt: new Date().toISOString(),
-                noteUpdatedAt: new Date().toISOString(),
-                relatedTaskId: "",
-                blocks: [],
-            });
-            return JSON.stringify({ missionId, noteId: note.noteId, noteTitle: input.title });
+            const noteId = generateRandomId();
+            return executeFormalCommand({ kind: "create_note", missionId, noteId, title: input.title });
         },
     },
     {
@@ -444,8 +429,7 @@ const tools: Tool[] = [
             const input = raw as NoteRefInput & { title: string };
             const state = useWorkSpace.getState();
             const note = resolveNote(state, input);
-            state.RenameNote(note.missionId, note.noteId, input.title);
-            return JSON.stringify({ ...note, noteTitle: input.title });
+            return executeFormalCommand({ kind: "rename_note", missionId: note.missionId, noteId: note.noteId, newTitle: input.title });
         },
     },
     {
@@ -460,8 +444,7 @@ const tools: Tool[] = [
         execute: async (raw) => {
             const state = useWorkSpace.getState();
             const note = resolveNote(state, raw as NoteRefInput);
-            state.deleteNote(note.missionId, note.noteId);
-            return JSON.stringify(note);
+            return executeFormalCommand({ kind: "delete_note", missionId: note.missionId, noteId: note.noteId });
         },
     },
     {
@@ -492,8 +475,7 @@ const tools: Tool[] = [
             const state = useWorkSpace.getState();
             const missionId = resolveMissionId(state, input);
             const boardId = generateRandomId();
-            state.createBoard({ BoardId: boardId, MissionId: missionId, title: input.title, Tasks: [] });
-            return JSON.stringify({ missionId, boardId, title: input.title });
+            return executeFormalCommand({ kind: "create_board", missionId, boardId, title: input.title });
         },
     },
     {
@@ -509,8 +491,7 @@ const tools: Tool[] = [
         execute: async (raw) => {
             const state = useWorkSpace.getState();
             const board = resolveBoard(state, raw as BoardRefInput);
-            state.RenameBoard(board.boardId, (raw as { title: string }).title);
-            return JSON.stringify({ ...board, title: (raw as { title: string }).title });
+            return executeFormalCommand({ kind: "rename_board", boardId: board.boardId, newTitle: (raw as { title: string }).title });
         },
     },
     {
@@ -525,8 +506,7 @@ const tools: Tool[] = [
         execute: async (raw) => {
             const state = useWorkSpace.getState();
             const board = resolveBoard(state, raw as BoardRefInput);
-            state.deleteBoard(board.boardId);
-            return JSON.stringify(board);
+            return executeFormalCommand({ kind: "delete_board", boardId: board.boardId });
         },
     },
     {
@@ -561,13 +541,8 @@ const tools: Tool[] = [
             const input = raw as BoardRefInput & { title: string };
             const state = useWorkSpace.getState();
             const board = resolveBoard(state, input);
-            const boardData = state.boards[board.boardId];
             const taskId = generateRandomId();
-            state.updataBoard(board.boardId, [
-                ...(boardData.Tasks || []),
-                { TaskId: taskId, title: input.title, linkedNoteIds: "", subTasks: [] },
-            ]);
-            return JSON.stringify({ ...board, taskId, title: input.title });
+            return executeFormalCommand({ kind: "create_task", boardId: board.boardId, taskId, title: input.title });
         },
     },
     {
@@ -586,8 +561,7 @@ const tools: Tool[] = [
             const input = raw as TaskRefInput & { title: string };
             const state = useWorkSpace.getState();
             const task = resolveTask(state, input);
-            state.RenameTask(task.boardId, task.taskId, input.title);
-            return JSON.stringify({ ...task, title: input.title });
+            return executeFormalCommand({ kind: "rename_task", boardId: task.boardId, taskId: task.taskId, newTitle: input.title });
         },
     },
     {
@@ -604,8 +578,7 @@ const tools: Tool[] = [
         execute: async (raw) => {
             const state = useWorkSpace.getState();
             const task = resolveTask(state, raw as TaskRefInput);
-            state.deleteTask(task.boardId, task.taskId);
-            return JSON.stringify(task);
+            return executeFormalCommand({ kind: "delete_task", boardId: task.boardId, taskId: task.taskId });
         },
     },
     {
@@ -646,14 +619,7 @@ const tools: Tool[] = [
             const state = useWorkSpace.getState();
             const task = resolveTask(state, input);
             const subTaskId = generateRandomId();
-            state.addSubTask(task.boardId, task.taskId, {
-                subTaskId,
-                title: input.title,
-                completed: false,
-                linkedNoteId: "",
-                linkedBlockId: "",
-            });
-            return JSON.stringify({ ...task, subTaskId, title: input.title });
+            return executeFormalCommand({ kind: "create_subtask", boardId: task.boardId, taskId: task.taskId, subTaskId, title: input.title });
         },
     },
     {
@@ -674,8 +640,7 @@ const tools: Tool[] = [
             const input = raw as SubTaskRefInput & { title: string };
             const state = useWorkSpace.getState();
             const subTask = resolveSubTask(state, input);
-            state.renameSubTask(subTask.boardId, subTask.taskId, subTask.subTaskId, input.title);
-            return JSON.stringify({ ...subTask, title: input.title });
+            return executeFormalCommand({ kind: "rename_subtask", boardId: subTask.boardId, taskId: subTask.taskId, subTaskId: subTask.subTaskId, newTitle: input.title });
         },
     },
     {
@@ -714,8 +679,7 @@ const tools: Tool[] = [
         execute: async (raw) => {
             const state = useWorkSpace.getState();
             const subTask = resolveSubTask(state, raw as SubTaskRefInput);
-            state.removeSubTask(subTask.boardId, subTask.taskId, subTask.subTaskId);
-            return JSON.stringify(subTask);
+            return executeFormalCommand({ kind: "delete_subtask", boardId: subTask.boardId, taskId: subTask.taskId, subTaskId: subTask.subTaskId });
         },
     },
     {
@@ -740,8 +704,8 @@ const tools: Tool[] = [
             const state = useWorkSpace.getState();
             const input = raw as SubTaskRefInput & BlockRefInput;
             const subTask = resolveSubTask(state, input);
-            let noteId = "";
-            let blockId = "";
+            let noteId: string | undefined;
+            let blockId: string | undefined;
             if (input.noteId || input.noteTitle) {
                 const note = resolveNote(state, input, false);
                 noteId = note.noteId;
@@ -749,8 +713,7 @@ const tools: Tool[] = [
                     blockId = resolveBlock(state, { ...input, noteId: note.noteId }).blockId;
                 }
             }
-            state.linkSubTask(subTask.boardId, subTask.taskId, subTask.subTaskId, noteId, blockId);
-            return JSON.stringify({ ...subTask, noteId, blockId });
+            return executeFormalCommand({ kind: "link_task_note", boardId: subTask.boardId, taskId: subTask.taskId, subTaskId: subTask.subTaskId, noteId, blockId });
         },
     },
     {
@@ -951,12 +914,11 @@ const tools: Tool[] = [
             const note = resolveNote(state, input);
             const block = resolveBlock(state, input);
             const task = resolveTask(state, input);
-            let subTaskId = "";
+            let subTaskId: string | undefined;
             if (input.subTaskId || input.subTaskTitle) {
                 subTaskId = resolveSubTask(state, { ...input, boardId: task.boardId, taskId: task.taskId }).subTaskId;
             }
-            state.linkBlock(note.missionId, note.noteId, block.blockId, task.boardId, task.taskId, subTaskId);
-            return JSON.stringify({ noteId: note.noteId, blockId: block.blockId, boardId: task.boardId, taskId: task.taskId, subTaskId });
+            return executeFormalCommand({ kind: "link_block", missionId: note.missionId, noteId: note.noteId, blockId: block.blockId, boardId: task.boardId, taskId: task.taskId, subTaskId });
         },
     },
     {
@@ -976,21 +938,15 @@ const tools: Tool[] = [
             const input = raw as NoteRefInput & { blocks: { blockType: "markdown" | "code"; content: string }[] };
             const state = useWorkSpace.getState();
             const noteRef = resolveNote(state, input);
-            const noteSnapshot = state.getNoteSnapshot(noteRef.noteId);
-            if (!noteSnapshot) throw new Error(`Note ${noteRef.noteId} not found`);
-            const mission = state.missions[noteSnapshot.missionId];
-            const noteEntity = mission.Notes.find((item) => item.noteId === noteRef.noteId);
-            if (!noteEntity) throw new Error(`Note ${noteRef.noteId} not found`);
             const now = new Date().toISOString();
-            const newBlocks = input.blocks.map((b) => ({
+            const newBlocks: SyncBlock[] = input.blocks.map((b) => ({
                 blockId: generateRandomId(),
                 blockType: b.blockType ?? "markdown",
                 blockContent: b.content,
                 blockCreatedAt: now,
                 blockUpdatedAt: now,
             }));
-            state.updateNote(noteSnapshot.missionId, noteRef.noteId, { ...noteEntity, blocks: newBlocks, noteUpdatedAt: now });
-            return JSON.stringify({ noteId: noteRef.noteId, noteTitle: noteRef.noteTitle, blocksWritten: newBlocks.length });
+            return executeFormalCommand({ kind: "rewrite_note", missionId: noteRef.missionId, noteId: noteRef.noteId, blocks: newBlocks });
         },
     },
 ];

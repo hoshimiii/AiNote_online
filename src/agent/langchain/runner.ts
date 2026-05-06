@@ -10,8 +10,22 @@ import { createLangChainModel } from "./model";
 import { createOpenAIToolSchemas, createToolMap } from "./tools";
 import type { LLMConfig } from "@/api/llm";
 import type { AgentTrace } from "@/agent/ReActAgent/main";
+import {
+    createExecutionPlan,
+    resolveAgentIntent,
+    verifyFormalExecution,
+} from "@/agent/runtime";
+import type {
+    AgentExecutionPlan,
+    ResolvedAgentIntent,
+} from "@/agent/runtime/contracts";
 
-const buildSystemPrompt = (userRules?: string, relatedMemories?: string[]) => {
+const buildSystemPrompt = (
+    userRules?: string,
+    relatedMemories?: string[],
+    resolvedIntent?: ResolvedAgentIntent,
+    executionPlan?: AgentExecutionPlan,
+) => {
     const base = `
 # 角色定义（Role）
 你是一个具备调用外部工具能力的“智能看板笔记助手（Agent）”，负责帮助用户管理工作区、任务、笔记及内容块（block）等结构化数据。
@@ -68,6 +82,12 @@ const buildSystemPrompt = (userRules?: string, relatedMemories?: string[]) => {
     let prompt = userRules?.trim() ? `${base}\n\n用户规则:\n${userRules.trim()}` : base;
     if (relatedMemories && relatedMemories.length > 0) {
         prompt += `\n\n## 相关记忆\n${relatedMemories.map((m) => `- ${m}`).join("\n")}`;
+    }
+    if (resolvedIntent) {
+        prompt += `\n\n## 当前意图识别\n${JSON.stringify(resolvedIntent, null, 2)}`;
+    }
+    if (executionPlan && executionPlan.steps.length > 0) {
+        prompt += `\n\n## 建议执行计划\n${JSON.stringify(executionPlan, null, 2)}`;
     }
     return prompt;
 };
@@ -159,7 +179,7 @@ async function compressHistory(
             new HumanMessage(dialogueText),
         ]);
         const summary = messageContentString(summaryMsg.content);
-        return [...systemMessages, new AIMessage(`[历史摘要] ${summary}`), ...toKeep];
+        return [systemMessages[0], new AIMessage(`[历史摘要] ${summary}`), ...toKeep];
     } catch {
         // 压缩失败则保持原样，不影响主流程
         return messages;
@@ -182,6 +202,8 @@ export const runLangChainAgent = async (
     const toolSchemas = createOpenAIToolSchemas();
     const toolMap = createToolMap();
     const modelWithTools = model.bindTools(toolSchemas);
+    const resolvedIntent = resolveAgentIntent(input);
+    const executionPlan = createExecutionPlan(resolvedIntent);
 
     const historyMessages: BaseMessage[] = chatHistory.flatMap((line: string): BaseMessage[] => {
         if (line.startsWith("user: ")) return [new HumanMessage(line.slice(6))];
@@ -190,16 +212,20 @@ export const runLangChainAgent = async (
     });
 
     let messages: BaseMessage[] = [
-        new SystemMessage(buildSystemPrompt(config.userRules, relatedMemories)),
-        new SystemMessage(`以下是用户与智能看板笔记助手的对话历史或者历史摘要，供你参考：\n`),
+        new SystemMessage(buildSystemPrompt(config.userRules, relatedMemories, resolvedIntent, executionPlan)),
         ...historyMessages,
-        new SystemMessage(`以下是用户的最新输入：\n`),
-        new HumanMessage(input),
     ];
-
+    onTrace?.({ step: 0, phase: "thought", content: `意图识别：${JSON.stringify(resolvedIntent)}` });
+    if (executionPlan.steps.length > 0) {
+        onTrace?.({ step: 0, phase: "thought", content: `计划：${JSON.stringify(executionPlan)}` });
+    }
+      
     // Phase 4：摘要压缩 — 当非系统消息总字符超过 8000 时，压缩旧历史防止 context 溢出
     messages = await compressHistory(messages, model);
+    messages.push(new SystemMessage(`以下是用户的最新输入：\n`));
+    messages.push(new HumanMessage(input));
 
+    
     for (let i = 0; i < maxSteps; i++) {
         const step = i + 1;
         let gathered: AIMessageChunk | undefined;
@@ -248,6 +274,16 @@ export const runLangChainAgent = async (
             }
 
             onTrace?.({ step, phase: "observation", content: result });
+            try {
+                const verification = verifyFormalExecution(JSON.parse(result));
+                onTrace?.({
+                    step,
+                    phase: "observation",
+                    content: `验证结果：${JSON.stringify(verification)}`,
+                });
+            } catch {
+                // 非结构化结果不额外验证，保持兼容旧工具。
+            }
 
             messages.push(
                 new ToolMessage({

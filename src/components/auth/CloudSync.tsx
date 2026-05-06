@@ -30,6 +30,11 @@ import { useEffect, useRef, useState } from "react"
 import { useSession } from "next-auth/react"
 import { useWorkSpace } from "@/store/kanban"
 import { useChatbot} from '@/store/Chatbot'
+import {
+  formatRepairSummary,
+  sanitizeSyncSnapshotPayload,
+  type RepairSummary,
+} from "@/lib/syncSnapshotIntegrity"
 
 const KANBAN_LOCAL_ONLY_KEYS = new Set([
   "activeWorkSpaceId",
@@ -126,61 +131,100 @@ export function CloudSync() {
   const hasPulled = useRef(false)
   const isSyncing = useRef(false)
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const [syncState, setSyncState] = useState<"pulling" | "pushing" | "done" | null>(null)
+  const [syncState, setSyncState] = useState<"pulling" | "pushing" | "done" | "warning" | "error" | null>(null)
+  const [syncMessage, setSyncMessage] = useState<string | null>(null)
 
-  const pushToCloud = () => {
+  const showSyncMessage = (state: "done" | "warning" | "error" | "pulling" | "pushing", message: string) => {
+    setSyncState(state)
+    setSyncMessage(message)
+  }
+
+  const pushToCloud = async () => {
     const snapshot = {
       ...extractKanbanState(useWorkSpace.getState()),
       _chatbot: extractChatbotState(),
     }
-    fetch("/api/sync", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(snapshot),
-    })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((result) => {
-        if (result?.updatedAt) {
-          isSyncing.current = true
-          useWorkSpace.getState().setCloudSyncTime(result.updatedAt)
-          setTimeout(() => { isSyncing.current = false }, 100)
-        }
+    const normalized = sanitizeSyncSnapshotPayload(snapshot)
+    if (!normalized.ok || !normalized.snapshot) {
+      showSyncMessage('error', `本地数据无法安全同步：${formatRepairSummary(normalized.repairSummary) ?? '存在关系错误'}`)
+      return null
+    }
+
+    try {
+      showSyncMessage('pushing', '正在上传本地数据...')
+      const res = await fetch("/api/sync", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(normalized.snapshot),
       })
-      .catch(console.error)
+      const result = await res.json().catch(() => null) as { updatedAt?: string; repairSummary?: RepairSummary; error?: string } | null
+
+      if (!res.ok) {
+        showSyncMessage('error', result?.repairSummary ? formatRepairSummary(result.repairSummary) ?? '云端拒绝了当前快照。' : (result?.error ?? '云端同步失败'))
+        return result
+      }
+
+      if (result?.updatedAt) {
+        isSyncing.current = true
+        useWorkSpace.getState().setCloudSyncTime(result.updatedAt)
+        setTimeout(() => { isSyncing.current = false }, 100)
+      }
+
+      const repairMessage = formatRepairSummary(result?.repairSummary)
+      if (repairMessage) {
+        showSyncMessage('warning', repairMessage)
+      } else {
+        showSyncMessage('done', '数据已同步')
+      }
+      return result
+    } catch (error) {
+      showSyncMessage('error', `上传失败：${error instanceof Error ? error.message : String(error)}`)
+      return null
+    }
   }
 
   useEffect(() => {
     if (status !== "authenticated" || !session?.user?.id || hasPulled.current) return
     hasPulled.current = true
-    setSyncState("pulling")
+    showSyncMessage('pulling', '正在从云端读取数据...')
 
-    fetch("/api/sync")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((result) => {
-        if (!result?.data) {
-          setSyncState("pushing")
-          pushToCloud()
-          setTimeout(() => setSyncState("done"), 1500)
+    void (async () => {
+      try {
+        const res = await fetch("/api/sync")
+        const result = await res.json().catch(() => null) as { data?: unknown; updatedAt?: string | null; repairSummary?: RepairSummary; error?: string } | null
+
+        if (!res.ok) {
+          showSyncMessage('error', result?.repairSummary ? formatRepairSummary(result.repairSummary) ?? '云端数据无法恢复。' : (result?.error ?? '云端读取失败'))
           return
         }
 
-        const cloudTime = new Date(result.updatedAt).getTime()
+        if (!result?.data) {
+          await pushToCloud()
+          return
+        }
+
+        const cloudTime = new Date(result.updatedAt ?? 0).getTime()
         const localSyncTime = useWorkSpace.getState()._cloudSyncTime
         const lastSynced = localSyncTime ? new Date(localSyncTime).getTime() : 0
 
         if (cloudTime > lastSynced) {
           const applied = validateAndApplyCloudData(result.data, isSyncing)
-          if (applied) {
+          if (applied && result.updatedAt) {
             useWorkSpace.getState().setCloudSyncTime(result.updatedAt)
+            const repairMessage = formatRepairSummary(result.repairSummary)
+            showSyncMessage(repairMessage ? 'warning' : 'done', repairMessage ?? '数据已同步')
           } else {
             console.warn("[CloudSync] 云端数据验证失败，以本地数据覆盖云端")
-            setSyncState("pushing")
-            pushToCloud()
+            showSyncMessage('warning', '云端数据结构不完整，已改为使用本地数据覆盖云端。')
+            await pushToCloud()
           }
+        } else {
+          showSyncMessage('done', '数据已同步')
         }
-        setTimeout(() => setSyncState("done"), 1500)
-      })
-      .catch(() => setSyncState(null))
+      } catch (error) {
+        showSyncMessage('error', `云端读取失败：${error instanceof Error ? error.message : String(error)}`)
+      }
+    })()
   }, [status, session?.user?.id])
 
   useEffect(() => {
@@ -201,15 +245,19 @@ export function CloudSync() {
     const onVisible = () => {
       if (document.visibilityState !== "visible") return
       fetch("/api/sync")
-        .then((res) => (res.ok ? res.json() : null))
+        .then(async (res) => ({ ok: res.ok, body: await res.json().catch(() => null) as { data?: unknown; updatedAt?: string | null; repairSummary?: RepairSummary } | null }))
         .then((result) => {
-          if (!result?.data) return
-          const cloudTime = new Date(result.updatedAt).getTime()
+          if (!result.ok || !result.body?.data) return
+          const cloudTime = new Date(result.body.updatedAt ?? 0).getTime()
           const localSyncTime = useWorkSpace.getState()._cloudSyncTime
           const lastSynced = localSyncTime ? new Date(localSyncTime).getTime() : 0
           if (cloudTime > lastSynced) {
-            const applied = validateAndApplyCloudData(result.data, isSyncing)
-            if (applied) useWorkSpace.getState().setCloudSyncTime(result.updatedAt)
+            const applied = validateAndApplyCloudData(result.body.data, isSyncing)
+            if (applied && result.body.updatedAt) {
+              useWorkSpace.getState().setCloudSyncTime(result.body.updatedAt)
+              const repairMessage = formatRepairSummary(result.body.repairSummary)
+              if (repairMessage) showSyncMessage('warning', repairMessage)
+            }
           }
         })
         .catch(console.error)
@@ -231,21 +279,22 @@ export function CloudSync() {
     }
   }, [status])
 
-  if (!syncState || syncState === null) return null
+  if (!syncState || syncState === null || !syncMessage) return null
+
+  const dotColor = syncState === 'done'
+    ? 'bg-green-500'
+    : syncState === 'warning'
+      ? 'bg-amber-500'
+      : syncState === 'error'
+        ? 'bg-red-500'
+        : 'bg-blue-500 animate-pulse'
 
   return (
     <div className="fixed top-4 left-1/2 -translate-x-1/2 z-9999 flex items-center gap-2 rounded-full bg-background border shadow-md px-4 py-2 text-sm text-foreground transition-all">
-      {syncState === "done" ? (
-        <>
-          <span className="h-2 w-2 rounded-full bg-green-500" />
-          数据已同步
-        </>
-      ) : (
-        <>
-          <span className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
-          {syncState === "pulling" ? "正在从云端读取数据..." : "正在上传本地数据..."}
-        </>
-      )}
+      <>
+        <span className={`h-2 w-2 rounded-full ${dotColor}`} />
+        {syncMessage}
+      </>
     </div>
   )
 }

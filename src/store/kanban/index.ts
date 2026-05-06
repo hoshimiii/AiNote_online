@@ -1,6 +1,11 @@
 import { JsonArray } from '@prisma/client/runtime/library';
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import {
+    cascadeDeleteBoardState,
+    cascadeDeleteMissionState,
+    cascadeDeleteWorkspaceState,
+} from './cascade'
 
 export type SubTask = {
     subTaskId: string;
@@ -122,6 +127,8 @@ export interface WorkSpaceProps {
     boards: Record<string, Board>,
     tasks: Record<string, Task>,
 
+    // 兼容层：以下持久化敏感写方法仅为迁移期间保留。
+    // 新增正式写操作应优先走 /api/kanban/command + executeFormalKanbanCommandClient。
     createWorkSpace: (WorkSpace: WorkSpace) => void,
     setWorkSpace: (WorkSpaceId: string | null) => void,
     deleteWorkSpace: (WorkSpaceId: string) => void,
@@ -173,6 +180,7 @@ export interface WorkSpaceProps {
     updateBlock: (missionId: string, note: Note, blockId: string, newBlock: Block) => void,
 
     setCloudSyncTime: (time: string) => void,
+    applyLoadedSnapshot: (snapshot: Partial<WorkSpaceProps>) => void,
 
     getCurrentContext: () => CurrentContextSnapshot,
     getWorkSpaceSnapshot: () => WorkSpaceSnapshot | null,
@@ -346,22 +354,7 @@ export const useWorkSpace = create<WorkSpaceProps>()(
             },
             deleteWorkSpace: (workspaceId) => {
                 set((state) => {
-                    // 1. 过滤掉目标空间
-                    const nextWorkspaces = state.workspaces.filter(w => w.workspaceId !== workspaceId);
-
-                    // 2. 如果删掉的是当前选中的空间，把 activeWorkspaceId 重置为 null (回到列表页)
-                    const nextActiveId = state.activeWorkSpaceId === workspaceId ? null : state.activeWorkSpaceId;
-                    const nextMissionOrder = { ...state.missionOrder };
-                    delete nextMissionOrder[workspaceId];
-                    return {
-                        workspaces: nextWorkspaces,
-                        activeWorkSpaceId: nextActiveId,
-                        activeMissionId: state.activeWorkSpaceId === workspaceId ? null : state.activeMissionId,
-                        currentMissionId: state.activeWorkSpaceId === workspaceId ? null : state.currentMissionId,
-                        currentNoteId: state.activeWorkSpaceId === workspaceId ? null : state.currentNoteId,
-                        previewMissionId: state.activeWorkSpaceId === workspaceId ? null : state.previewMissionId,
-                        missionOrder: nextMissionOrder,
-                    };
+                    return cascadeDeleteWorkspaceState(state, workspaceId);
                 });
             },
             RenameWorkSpace: (workspaceId, newName) => {
@@ -417,19 +410,7 @@ export const useWorkSpace = create<WorkSpaceProps>()(
             },
             deleteMission: (missionId) => {
                 set((state) => {
-                    const mission = state.missions[missionId];
-                    const wsId = mission?.WorkSpaceId;
-                    const nextMissionOrder = wsId
-                        ? { ...state.missionOrder, [wsId]: (state.missionOrder[wsId] ?? []).filter(id => id !== missionId) }
-                        : state.missionOrder;
-                    return {
-                        missions: Object.fromEntries(Object.entries(state.missions).filter(([id]) => id !== missionId)),
-                        missionOrder: nextMissionOrder,
-                        activeMissionId: state.activeMissionId === missionId ? null : state.activeMissionId,
-                        currentMissionId: state.currentMissionId === missionId ? null : state.currentMissionId,
-                        currentNoteId: state.currentMissionId === missionId ? null : state.currentNoteId,
-                        previewMissionId: state.previewMissionId === missionId ? null : state.previewMissionId,
-                    };
+                    return cascadeDeleteMissionState(state, missionId);
                 });
             },
             RenameMission: (missionId, newName) => {
@@ -480,15 +461,7 @@ export const useWorkSpace = create<WorkSpaceProps>()(
             },
             deleteBoard: (boardId) => {
                 set((state) => {
-                    const board = state.boards[boardId];
-                    const mId = board?.MissionId;
-                    const nextBoardOrder = mId
-                        ? { ...state.boardOrder, [mId]: (state.boardOrder[mId] ?? []).filter(id => id !== boardId) }
-                        : state.boardOrder;
-                    return {
-                        boards: Object.fromEntries(Object.entries(state.boards).filter(([id]) => id !== boardId)),
-                        boardOrder: nextBoardOrder,
-                    };
+                    return cascadeDeleteBoardState(state, boardId);
                 });
             },
             RenameBoard: (boardId, newName) => {
@@ -827,6 +800,14 @@ export const useWorkSpace = create<WorkSpaceProps>()(
             },
             setCloudSyncTime: (time: string) => {
                 set({ _cloudSyncTime: time });
+            },
+            applyLoadedSnapshot: (snapshot) => {
+                set((state) => ({
+                    ...state,
+                    ...snapshot,
+                    activeMissionId: snapshot.currentMissionId ?? state.activeMissionId,
+                    previewMissionId: null,
+                }));
             },
 
             getCurrentContext: () => {

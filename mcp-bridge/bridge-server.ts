@@ -232,8 +232,7 @@ mcpServer.registerTool(
 mcpServer.registerTool(
   "organize_wrong_answers",
   {
-    // 依然保留 md 作为详细指令
-    description: fs.readFileSync(path.join(__dirname, "skills/organize-wrong-answers.prompt.md"), "utf-8"),
+    description: "当前桥接版会确保存在目标 mission，并把传入错题内容保存为单条笔记。逐题拆分、子任务串联和知识点扩展仍待后续补齐。",
     inputSchema: {
       content: z.string().describe("需要整理的错题原始内容"),
       workspaceId: z.string().optional().describe("工作区ID"),
@@ -255,7 +254,7 @@ mcpServer.registerTool(
 mcpServer.registerTool(
   "upload_docs_to_ainote",
   {
-    description: fs.readFileSync(path.join(__dirname, "skills/upload-docs-to-ainote.prompt.md"), "utf-8"),
+    description: "读取 docsPath 下的 Markdown 文件，确保 mission 存在后逐篇创建 note；当前实现不负责复杂去重与层级推断。",
 
     inputSchema: {
       docsPath: z.string().optional(),

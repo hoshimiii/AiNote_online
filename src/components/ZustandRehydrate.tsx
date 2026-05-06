@@ -21,11 +21,11 @@ export function ZustandRehydrate({ children }: { children: ReactNode }) {
   useLayoutEffect(() => {
     const p = useWorkSpace.persist
     if (!p) {
-      setReady(true)
+      queueMicrotask(() => setReady(true))
       return
     }
     if (p.hasHydrated()) {
-      setReady(true)
+      queueMicrotask(() => setReady(true))
       return
     }
     const unsub = p.onFinishHydration(() => setReady(true))

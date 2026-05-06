@@ -41,9 +41,9 @@ export async function POST(request: Request) {
     try {
         const result = await executor.execute(code, language);
         return NextResponse.json(result);
-    } catch (err: any) {
+    } catch (err) {
         return NextResponse.json(
-            { error: `执行失败: ${err?.message ?? "未知错误"}` },
+            { error: `执行失败: ${(err as Error)?.message ?? "未知错误"}` },
             { status: 500 }
         );
     }
