@@ -105,16 +105,29 @@ mcpServer.registerTool(
     description: "List workspaces",
     inputSchema: {},
   },
-  async (args) => forward("list_workspaces", args as Record<string, unknown>),
+  async () => {
+    const workspaces = await listWorkspaces()
+    return {
+      content: [{ type: "text" as const, text: JSON.stringify(workspaces, null, 2) }],
+    }
+  },
 )
 
 mcpServer.registerTool(
   "list_missions",
   {
     description: "List missions; optional workspaceId filter",
-    inputSchema: { workspaceId: z.string().optional() },
+    inputSchema: { workspaceId: z.string().optional(), workspaceName: z.string().optional() },
   },
-  async (args) => forward("list_missions", args as Record<string, unknown>),
+  async (args) => {
+    const input = args as Record<string, unknown>
+    if (!input.workspaceId && !input.workspaceName) {
+      return forward("list_missions", {})
+    }
+    const workspaceRef = (input.workspaceId as string | undefined) ?? (input.workspaceName as string | undefined)
+    const workspaceId = await resolveWorkspaceId(workspaceRef)
+    return forward("list_missions", workspaceId ? { workspaceId } : {})
+  },
 )
 
 mcpServer.registerTool(
@@ -166,9 +179,15 @@ mcpServer.registerTool(
   "create_mission",
   {
     description: "Find or create mission in workspace",
-    inputSchema: { workspaceId: z.string(), title: z.string() },
+    inputSchema: { workspaceId: z.string().optional(), workspaceName: z.string().optional(), title: z.string() },
   },
-  async (args) => forward("create_mission", args as Record<string, unknown>),
+  async (args) => {
+    const input = args as Record<string, unknown>
+    const workspaceRef = (input.workspaceId as string | undefined) ?? (input.workspaceName as string | undefined)
+    const workspaceId = await resolveWorkspaceId(workspaceRef)
+    if (!workspaceId) throw new Error("Workspace context not found")
+    return forward("create_mission", { workspaceId, title: input.title })
+  },
 )
 
 mcpServer.registerTool(
@@ -217,6 +236,7 @@ mcpServer.registerTool(
     description: "Create mission/board/task/subtask/note chain in one call",
     inputSchema: {
       workspaceId: z.string().optional(),
+      workspaceName: z.string().optional(),
       missionTitle: z.string(),
       boardTitle: z.string(),
       taskTitle: z.string(),
@@ -225,7 +245,17 @@ mcpServer.registerTool(
       blocks: z.array(blockInput).optional(),
     },
   },
-  async (args) => forward("create_study_note", args as Record<string, unknown>),
+  async (args) => {
+    const input = args as Record<string, unknown>
+    const workspaceRef = (input.workspaceId as string | undefined) ?? (input.workspaceName as string | undefined)
+    const workspaceId = await resolveWorkspaceId(workspaceRef)
+    const payload = {
+      ...input,
+      ...(workspaceId ? { workspaceId } : {}),
+    }
+    delete (payload as Record<string, unknown>).workspaceName
+    return forward("create_study_note", payload)
+  },
 )
 
 // Skill: 整理错题到云端（来自 mcp-bridge/skills/organize-wrong-answers.prompt.md）
@@ -237,6 +267,7 @@ mcpServer.registerTool(
     inputSchema: {
       content: z.string().describe("需要整理的错题原始内容"),
       workspaceId: z.string().optional().describe("工作区ID"),
+      workspaceName: z.string().optional().describe("工作区名称"),
       missionId: z.string().optional().describe("任务ID"),
       // 删除了 options，因为 Agent 不需要关心重试次数和日志等级
     },
@@ -260,6 +291,7 @@ mcpServer.registerTool(
     inputSchema: {
       docsPath: z.string().optional(),
       workspaceId: z.string().optional(),
+      workspaceName: z.string().optional(),
       missionTitle: z.string().optional(),
       options: z
         .object({
@@ -288,16 +320,65 @@ async function callTool(toolName: string, args: Record<string, unknown>, opts?: 
   }
 }
 
-async function resolveWorkspaceId(
-  providedId: string | undefined,
-  opts?: { timeoutMs?: number; retries?: number; logLevel?: "info" | "warn" | "error" },
-): Promise<string | undefined> {
-  if (providedId) return providedId
-  const workspaces = (await callTool("list_workspaces", {}, opts)) as unknown[] | null
-  if (Array.isArray(workspaces) && workspaces.length > 0) {
-    return resolveId(workspaces[0], ["id", "workspaceId"])
+function normalizeText(value: unknown) {
+  return typeof value === "string" ? value.trim().toLowerCase() : ""
+}
+
+function getWorkspaceName(obj: unknown): string | undefined {
+  if (!obj || typeof obj !== "object") return undefined
+  const rec = obj as Record<string, unknown>
+  for (const key of ["workspaceName", "name", "title"] as const) {
+    const value = rec[key]
+    if (typeof value === "string" && value.trim()) return value.trim()
   }
   return undefined
+}
+
+function isCurrentWorkspace(obj: unknown) {
+  if (!obj || typeof obj !== "object") return false
+  return (obj as Record<string, unknown>).isCurrent === true
+}
+
+function normalizeWorkspaceSummary(obj: unknown) {
+  if (!obj || typeof obj !== "object") {
+    const workspaceId = resolveId(obj, ["id", "workspaceId"])
+    return workspaceId ? { id: workspaceId, workspaceId } : obj
+  }
+  const rec = obj as Record<string, unknown>
+  const workspaceId = resolveId(rec, ["id", "workspaceId"])
+  const workspaceName = getWorkspaceName(rec)
+  return {
+    ...rec,
+    ...(workspaceId ? { id: workspaceId, workspaceId } : {}),
+    ...(workspaceName ? { name: workspaceName, title: workspaceName, workspaceName } : {}),
+  }
+}
+
+async function listWorkspaces(opts?: { timeoutMs?: number; retries?: number; logLevel?: "info" | "warn" | "error" }) {
+  const workspaces = (await callTool("list_workspaces", {}, opts)) as unknown[] | null
+  if (!Array.isArray(workspaces)) return []
+  return workspaces.map((workspace) => normalizeWorkspaceSummary(workspace))
+}
+
+async function resolveWorkspaceId(
+  providedRef: string | undefined,
+  opts?: { timeoutMs?: number; retries?: number; logLevel?: "info" | "warn" | "error" },
+): Promise<string | undefined> {
+  const workspaces = await listWorkspaces(opts)
+  if (!providedRef) {
+    const preferred = workspaces.find((workspace) => isCurrentWorkspace(workspace)) ?? workspaces[0]
+    return resolveId(preferred, ["id", "workspaceId"])
+  }
+
+  const exactIdMatch = workspaces.find((workspace) => resolveId(workspace, ["id", "workspaceId"]) === providedRef)
+  if (exactIdMatch) return resolveId(exactIdMatch, ["id", "workspaceId"])
+
+  const normalizedRef = normalizeText(providedRef)
+  const nameMatch = workspaces.find((workspace) => normalizeText(getWorkspaceName(workspace)) === normalizedRef)
+  if (nameMatch) return resolveId(nameMatch, ["id", "workspaceId"])
+
+  if (workspaces.length === 0) return providedRef
+  throw new Error(`Workspace ${providedRef} not found`)
 }
 
 function resolveId(obj: unknown, prefer?: string[]): string | undefined {
@@ -315,7 +396,8 @@ function resolveId(obj: unknown, prefer?: string[]): string | undefined {
 async function handleUploadDocs(args: Record<string, unknown>, opts?: { timeoutMs?: number; retries?: number; logLevel?: "info" | "warn" | "error" }) {
   const docsPath = args.docsPath ? path.resolve(args.docsPath as string) : path.join(__dirname, "..", "docs")
   const missionTitle = (args.missionTitle as string | undefined) ?? "项目文档"
-  const workspaceId = await resolveWorkspaceId(args.workspaceId as string | undefined, opts)
+  const workspaceRef = (args.workspaceId as string | undefined) ?? (args.workspaceName as string | undefined)
+  const workspaceId = await resolveWorkspaceId(workspaceRef, opts)
   const log = (obj: unknown) => mlog("upload_docs", obj)
 
   // list missions
@@ -371,7 +453,8 @@ async function handleOrganizeWrongAnswers(args: Record<string, unknown>, opts?: 
   const content = args.content
   if (!content) throw new Error("content is required")
   const missionTitle = (args.missionTitle as string | undefined) ?? "错题整理"
-  const workspaceId = await resolveWorkspaceId(args.workspaceId as string | undefined, opts)
+  const workspaceRef = (args.workspaceId as string | undefined) ?? (args.workspaceName as string | undefined)
+  const workspaceId = await resolveWorkspaceId(workspaceRef, opts)
   const log = (obj: unknown) => mlog("organize_wrong_answers", obj)
 
   const missions = (await callTool("list_missions", { workspaceId }, opts)) as unknown[] | null

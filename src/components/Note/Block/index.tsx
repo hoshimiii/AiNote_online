@@ -1,6 +1,7 @@
 import { type Block as BlockType } from "@/store/kanban";
 import ReactMarkdown from "react-markdown";
 import rehypeKatex from "rehype-katex";
+import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { useState, useEffect, useRef, useMemo, type ClipboardEvent } from "react";
 import CodeMirror from "@uiw/react-codemirror";
@@ -9,7 +10,6 @@ import { python } from "@codemirror/lang-python";
 import { cpp } from "@codemirror/lang-cpp";
 import { java } from "@codemirror/lang-java";
 import type { Extension } from "@codemirror/state";
-import { Divide } from "lucide-react";
 
 const SUPPORTED_LANGUAGES = [
     { value: "javascript", label: "JavaScript" },
@@ -294,10 +294,10 @@ export const Block = ({
                     executionTimestamp: new Date().toISOString(),
                 });
             }
-        } catch (err: any) {
+        } catch (err) {
             onUpdateBlock?.({
                 executionOutput: "",
-                executionError: err?.message ?? "网络错误",
+                executionError: (err as Error)?.message ?? "网络错误",
                 executionExitCode: 1,
                 executionTimestamp: new Date().toISOString(),
             });
@@ -329,7 +329,7 @@ export const Block = ({
                                     onClick={handlePreviewClick}
                                 >
                                     <ReactMarkdown
-                                        remarkPlugins={[remarkMath]}
+                                        remarkPlugins={[remarkGfm, remarkMath]}
                                         rehypePlugins={[rehypeKatex]}
                                         components={{
                                             h1: ({ children }) => <h1 className="text-3xl font-bold my-3">{children}</h1>,
@@ -339,6 +339,19 @@ export const Block = ({
                                             ul: ({ children }) => <ul className="list-disc pl-6 my-2 space-y-1">{children}</ul>,
                                             ol: ({ children }) => <ol className="list-decimal pl-6 my-2 space-y-1">{children}</ol>,
                                             li: ({ children }) => <li className="leading-7">{children}</li>,
+                                            table: ({ children }) => (
+                                                <div className="my-4 overflow-x-auto">
+                                                    <table className="min-w-full border-collapse border border-gray-200 text-sm">
+                                                        {children}
+                                                    </table>
+                                                </div>
+                                            ),
+                                            th: ({ children }) => (
+                                                <th className="border border-gray-200 bg-gray-50 px-3 py-2 text-left font-semibold">
+                                                    {children}
+                                                </th>
+                                            ),
+                                            td: ({ children }) => <td className="border border-gray-200 px-3 py-2 align-top">{children}</td>,
                                             code: ({ children }) => (
                                                 <code className="bg-gray-100 px-1 py-0.5 rounded text-sm">{children}</code>
                                             ),

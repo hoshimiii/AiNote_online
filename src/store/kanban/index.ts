@@ -1,4 +1,3 @@
-import { JsonArray } from '@prisma/client/runtime/library';
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
@@ -152,6 +151,7 @@ export interface WorkSpaceProps {
     moveTask: (taskId: string, sourceBoardId: string, targetBoardId: string, targetIndex?: number) => void,
     reorderTasks: (boardId: string, orderedIds: string[]) => void,
     setLinkedNoteIds: (boardId: string, taskId: string, linkedNoteIds: string) => void,
+    setNoteTaskLink: (missionId: string, noteId: string, taskId: string) => void,
 
     addSubTask: (boardId: string, taskId: string, subTask: SubTask) => void,
     removeSubTask: (boardId: string, taskId: string, subTaskId: string) => void,
@@ -309,6 +309,192 @@ const buildMissionSnapshotFromState = (state: WorkSpaceProps, missionId: string)
     };
 };
 
+const hasRemovedId = (ids: Set<string> | undefined, value: string | null | undefined) => !!value && !!ids?.has(value);
+
+const collectBoardDescendants = (board: Board | undefined) => {
+    const taskIds = new Set<string>();
+    const subTaskIds = new Set<string>();
+
+    for (const task of board?.Tasks || []) {
+        taskIds.add(task.TaskId);
+        for (const subTask of task.subTasks || []) {
+            subTaskIds.add(subTask.subTaskId);
+        }
+    }
+
+    return { taskIds, subTaskIds };
+};
+
+const collectMissionDescendants = (state: WorkSpaceProps, missionId: string) => {
+    const boardIds = new Set<string>();
+    const taskIds = new Set<string>();
+    const subTaskIds = new Set<string>();
+    const noteIds = new Set<string>();
+
+    for (const note of state.missions[missionId]?.Notes || []) {
+        noteIds.add(note.noteId);
+    }
+
+    for (const [boardId, board] of Object.entries(state.boards)) {
+        if (board.MissionId !== missionId) continue;
+        boardIds.add(boardId);
+        const descendants = collectBoardDescendants(board);
+        descendants.taskIds.forEach((taskId) => taskIds.add(taskId));
+        descendants.subTaskIds.forEach((subTaskId) => subTaskIds.add(subTaskId));
+    }
+
+    return { boardIds, taskIds, subTaskIds, noteIds };
+};
+
+const collectWorkspaceDescendants = (state: WorkSpaceProps, workspaceId: string) => {
+    const missionIds = new Set<string>();
+    const boardIds = new Set<string>();
+    const taskIds = new Set<string>();
+    const subTaskIds = new Set<string>();
+    const noteIds = new Set<string>();
+
+    for (const mission of Object.values(state.missions)) {
+        if (mission.WorkSpaceId !== workspaceId) continue;
+        missionIds.add(mission.MissionId);
+        for (const note of mission.Notes || []) {
+            noteIds.add(note.noteId);
+        }
+    }
+
+    for (const [boardId, board] of Object.entries(state.boards)) {
+        if (!missionIds.has(board.MissionId)) continue;
+        boardIds.add(boardId);
+        const descendants = collectBoardDescendants(board);
+        descendants.taskIds.forEach((taskId) => taskIds.add(taskId));
+        descendants.subTaskIds.forEach((subTaskId) => subTaskIds.add(subTaskId));
+    }
+
+    return { missionIds, boardIds, taskIds, subTaskIds, noteIds };
+};
+
+const pruneTaskMap = (tasks: Record<string, Task>, removedTaskIds: Set<string>) => {
+    if (removedTaskIds.size === 0) return tasks;
+    return Object.fromEntries(Object.entries(tasks).filter(([taskId]) => !removedTaskIds.has(taskId)));
+};
+
+const sanitizeBoardsAfterDeletion = (
+    boards: Record<string, Board>,
+    options: {
+        removedNoteIds?: Set<string>,
+        removedBlockIds?: Set<string>,
+    }
+) => {
+    return Object.fromEntries(
+        Object.entries(boards).map(([boardId, board]) => [
+            boardId,
+            {
+                ...board,
+                Tasks: (board.Tasks || []).map((task) => ({
+                    ...task,
+                    linkedNoteIds: hasRemovedId(options.removedNoteIds, task.linkedNoteIds) ? "" : task.linkedNoteIds,
+                    subTasks: (task.subTasks || []).map((subTask) => {
+                        const shouldClearNote = hasRemovedId(options.removedNoteIds, subTask.linkedNoteId);
+                        const shouldClearBlock = shouldClearNote || hasRemovedId(options.removedBlockIds, subTask.linkedBlockId);
+                        if (!shouldClearNote && !shouldClearBlock) return subTask;
+                        return {
+                            ...subTask,
+                            linkedNoteId: shouldClearNote ? "" : subTask.linkedNoteId,
+                            linkedBlockId: shouldClearBlock ? "" : subTask.linkedBlockId,
+                        };
+                    }),
+                })),
+            },
+        ])
+    );
+};
+
+const sanitizeMissionsAfterDeletion = (
+    missions: Record<string, Mission>,
+    options: {
+        removedBoardIds?: Set<string>,
+        removedTaskIds?: Set<string>,
+        removedSubTaskIds?: Set<string>,
+    }
+) => {
+    return Object.fromEntries(
+        Object.entries(missions).map(([missionId, mission]) => [
+            missionId,
+            {
+                ...mission,
+                Notes: (mission.Notes || []).map((note) => ({
+                    ...note,
+                    relatedTaskId: hasRemovedId(options.removedTaskIds, note.relatedTaskId) ? "" : note.relatedTaskId,
+                    blocks: (note.blocks || []).map((block) => {
+                        const shouldClearTaskLink =
+                            hasRemovedId(options.removedBoardIds, block.linkedBoardId) ||
+                            hasRemovedId(options.removedTaskIds, block.linkedTaskId);
+                        if (shouldClearTaskLink) {
+                            return {
+                                ...block,
+                                linkedBoardId: "",
+                                linkedTaskId: "",
+                                linkedSubTaskId: "",
+                            };
+                        }
+                        if (hasRemovedId(options.removedSubTaskIds, block.linkedSubTaskId)) {
+                            return {
+                                ...block,
+                                linkedSubTaskId: "",
+                            };
+                        }
+                        return block;
+                    }),
+                })),
+            },
+        ])
+    );
+};
+
+const findTaskLocation = (boards: Record<string, Board>, taskId: string) => {
+    for (const [boardId, board] of Object.entries(boards)) {
+        const taskIndex = (board.Tasks || []).findIndex((task) => task.TaskId === taskId);
+        if (taskIndex >= 0) {
+            return { boardId, taskIndex };
+        }
+    }
+    return null;
+};
+
+const findNoteLocation = (missions: Record<string, Mission>, noteId: string) => {
+    for (const [missionId, mission] of Object.entries(missions)) {
+        const noteIndex = (mission.Notes || []).findIndex((note) => note.noteId === noteId);
+        if (noteIndex >= 0) {
+            return { missionId, noteIndex };
+        }
+    }
+    return null;
+};
+
+const findBlockLocation = (missions: Record<string, Mission>, noteId: string, blockId: string) => {
+    const noteLocation = findNoteLocation(missions, noteId);
+    if (!noteLocation) return null;
+    const note = missions[noteLocation.missionId].Notes[noteLocation.noteIndex];
+    const blockIndex = (note.blocks || []).findIndex((block) => block.blockId === blockId);
+    if (blockIndex < 0) return null;
+    return { ...noteLocation, blockIndex };
+};
+
+const findSubTaskLocation = (boards: Record<string, Board>, subTaskId: string) => {
+    for (const [boardId, board] of Object.entries(boards)) {
+        for (const [taskIndex, task] of (board.Tasks || []).entries()) {
+            const subTaskIndex = (task.subTasks || []).findIndex((subTask) => subTask.subTaskId === subTaskId);
+            if (subTaskIndex >= 0) {
+                return { boardId, taskIndex, subTaskIndex };
+            }
+        }
+    }
+    return null;
+};
+
+const syncTaskShadow = (tasks: Record<string, Task>, task: Task) => {
+    tasks[task.TaskId] = { ...task };
+};
+
 
 export const useWorkSpace = create<WorkSpaceProps>()(
     persist(
@@ -346,21 +532,42 @@ export const useWorkSpace = create<WorkSpaceProps>()(
             },
             deleteWorkSpace: (workspaceId) => {
                 set((state) => {
-                    // 1. 过滤掉目标空间
+                    const { missionIds, boardIds, taskIds, subTaskIds, noteIds } = collectWorkspaceDescendants(state, workspaceId);
                     const nextWorkspaces = state.workspaces.filter(w => w.workspaceId !== workspaceId);
-
-                    // 2. 如果删掉的是当前选中的空间，把 activeWorkspaceId 重置为 null (回到列表页)
-                    const nextActiveId = state.activeWorkSpaceId === workspaceId ? null : state.activeWorkSpaceId;
                     const nextMissionOrder = { ...state.missionOrder };
                     delete nextMissionOrder[workspaceId];
+                    const nextBoardOrder = Object.fromEntries(
+                        Object.entries(state.boardOrder).filter(([missionId]) => !missionIds.has(missionId))
+                    );
+                    const nextMissionsBase = Object.fromEntries(
+                        Object.entries(state.missions).filter(([missionId]) => !missionIds.has(missionId))
+                    );
+                    const nextBoardsBase = Object.fromEntries(
+                        Object.entries(state.boards).filter(([boardId]) => !boardIds.has(boardId))
+                    );
+                    const nextMissions = sanitizeMissionsAfterDeletion(nextMissionsBase, {
+                        removedBoardIds: boardIds,
+                        removedTaskIds: taskIds,
+                        removedSubTaskIds: subTaskIds,
+                    });
+                    const nextBoards = sanitizeBoardsAfterDeletion(nextBoardsBase, { removedNoteIds: noteIds });
+                    const removedActiveMission = !!state.activeMissionId && missionIds.has(state.activeMissionId);
+                    const removedCurrentMission = !!state.currentMissionId && missionIds.has(state.currentMissionId);
+                    const removedCurrentNote = !!state.currentNoteId && noteIds.has(state.currentNoteId);
+                    const removedPreviewMission = !!state.previewMissionId && missionIds.has(state.previewMissionId);
+
                     return {
                         workspaces: nextWorkspaces,
-                        activeWorkSpaceId: nextActiveId,
-                        activeMissionId: state.activeWorkSpaceId === workspaceId ? null : state.activeMissionId,
-                        currentMissionId: state.activeWorkSpaceId === workspaceId ? null : state.currentMissionId,
-                        currentNoteId: state.activeWorkSpaceId === workspaceId ? null : state.currentNoteId,
-                        previewMissionId: state.activeWorkSpaceId === workspaceId ? null : state.previewMissionId,
+                        activeWorkSpaceId: state.activeWorkSpaceId === workspaceId ? null : state.activeWorkSpaceId,
+                        activeMissionId: removedActiveMission ? null : state.activeMissionId,
+                        currentMissionId: removedCurrentMission ? null : state.currentMissionId,
+                        currentNoteId: removedCurrentNote ? null : state.currentNoteId,
+                        previewMissionId: removedPreviewMission ? null : state.previewMissionId,
                         missionOrder: nextMissionOrder,
+                        boardOrder: nextBoardOrder,
+                        missions: nextMissions,
+                        boards: nextBoards,
+                        tasks: pruneTaskMap(state.tasks, taskIds),
                     };
                 });
             },
@@ -419,15 +626,33 @@ export const useWorkSpace = create<WorkSpaceProps>()(
                 set((state) => {
                     const mission = state.missions[missionId];
                     const wsId = mission?.WorkSpaceId;
+                    const { boardIds, taskIds, subTaskIds, noteIds } = collectMissionDescendants(state, missionId);
                     const nextMissionOrder = wsId
                         ? { ...state.missionOrder, [wsId]: (state.missionOrder[wsId] ?? []).filter(id => id !== missionId) }
                         : state.missionOrder;
+                    const nextBoardOrder = Object.fromEntries(
+                        Object.entries(state.boardOrder).filter(([key]) => key !== missionId)
+                    );
+                    const nextMissionsBase = Object.fromEntries(Object.entries(state.missions).filter(([id]) => id !== missionId));
+                    const nextBoardsBase = Object.fromEntries(
+                        Object.entries(state.boards).filter(([boardId]) => !boardIds.has(boardId))
+                    );
+                    const nextMissions = sanitizeMissionsAfterDeletion(nextMissionsBase, {
+                        removedBoardIds: boardIds,
+                        removedTaskIds: taskIds,
+                        removedSubTaskIds: subTaskIds,
+                    });
+                    const nextBoards = sanitizeBoardsAfterDeletion(nextBoardsBase, { removedNoteIds: noteIds });
+
                     return {
-                        missions: Object.fromEntries(Object.entries(state.missions).filter(([id]) => id !== missionId)),
+                        missions: nextMissions,
+                        boards: nextBoards,
+                        tasks: pruneTaskMap(state.tasks, taskIds),
                         missionOrder: nextMissionOrder,
+                        boardOrder: nextBoardOrder,
                         activeMissionId: state.activeMissionId === missionId ? null : state.activeMissionId,
                         currentMissionId: state.currentMissionId === missionId ? null : state.currentMissionId,
-                        currentNoteId: state.currentMissionId === missionId ? null : state.currentNoteId,
+                        currentNoteId: state.currentNoteId && noteIds.has(state.currentNoteId) ? null : state.currentNoteId,
                         previewMissionId: state.previewMissionId === missionId ? null : state.previewMissionId,
                     };
                 });
@@ -482,11 +707,19 @@ export const useWorkSpace = create<WorkSpaceProps>()(
                 set((state) => {
                     const board = state.boards[boardId];
                     const mId = board?.MissionId;
+                    const { taskIds, subTaskIds } = collectBoardDescendants(board);
                     const nextBoardOrder = mId
                         ? { ...state.boardOrder, [mId]: (state.boardOrder[mId] ?? []).filter(id => id !== boardId) }
                         : state.boardOrder;
+                    const nextBoards = Object.fromEntries(Object.entries(state.boards).filter(([id]) => id !== boardId));
                     return {
-                        boards: Object.fromEntries(Object.entries(state.boards).filter(([id]) => id !== boardId)),
+                        boards: nextBoards,
+                        tasks: pruneTaskMap(state.tasks, taskIds),
+                        missions: sanitizeMissionsAfterDeletion(state.missions, {
+                            removedBoardIds: new Set([boardId]),
+                            removedTaskIds: taskIds,
+                            removedSubTaskIds: subTaskIds,
+                        }),
                         boardOrder: nextBoardOrder,
                     };
                 });
@@ -524,7 +757,26 @@ export const useWorkSpace = create<WorkSpaceProps>()(
                 set((state) => ({ tasks: { ...state.tasks, [task.TaskId]: task } }));
             },
             deleteTask: (boardId, taskId) => {
-                set((state) => ({ boards: { ...state.boards, [boardId]: { ...state.boards[boardId], Tasks: state.boards[boardId].Tasks.filter(t => t.TaskId !== taskId) } } }));
+                set((state) => {
+                    const board = state.boards[boardId];
+                    const task = board?.Tasks.find((item) => item.TaskId === taskId);
+                    const subTaskIds = new Set<string>((task?.subTasks || []).map((subTask) => subTask.subTaskId));
+
+                    return {
+                        boards: {
+                            ...state.boards,
+                            [boardId]: {
+                                ...state.boards[boardId],
+                                Tasks: state.boards[boardId].Tasks.filter(t => t.TaskId !== taskId),
+                            },
+                        },
+                        tasks: pruneTaskMap(state.tasks, new Set([taskId])),
+                        missions: sanitizeMissionsAfterDeletion(state.missions, {
+                            removedTaskIds: new Set([taskId]),
+                            removedSubTaskIds: subTaskIds,
+                        }),
+                    };
+                });
             },
             RenameTask: (boardId, taskId, newName) => {
                 set((state) => ({ boards: { ...state.boards, [boardId]: { ...state.boards[boardId], Tasks: state.boards[boardId].Tasks.map(t => t.TaskId === taskId ? { ...t, title: newName } : t) } } }));
@@ -570,6 +822,57 @@ export const useWorkSpace = create<WorkSpaceProps>()(
             setLinkedNoteIds: (boardId, taskId, linkedNoteIds) => {
                 set((state) => ({ boards: { ...state.boards, [boardId]: { ...state.boards[boardId], Tasks: state.boards[boardId].Tasks.map(t => t.TaskId === taskId ? { ...t, linkedNoteIds } : t) } } }));
             },
+            setNoteTaskLink: (missionId, noteId, taskId) => {
+                set((state) => {
+                    const mission = state.missions[missionId];
+                    const note = mission?.Notes.find((item) => item.noteId === noteId);
+                    if (!mission || !note) return state;
+
+                    const nextTaskId = taskId || "";
+                    if (nextTaskId && !findTaskLocation(state.boards, nextTaskId)) return state;
+
+                    const timestamp = new Date().toISOString();
+                    const missions = structuredClone(state.missions);
+                    const boards = structuredClone(state.boards);
+                    const tasks = structuredClone(state.tasks);
+
+                    for (const board of Object.values(boards)) {
+                        board.Tasks = (board.Tasks || []).map((taskEntity) => {
+                            let nextTask = taskEntity;
+                            if ((taskEntity.linkedNoteIds === noteId && taskEntity.TaskId !== nextTaskId) || taskEntity.TaskId === note.relatedTaskId) {
+                                nextTask = { ...nextTask, linkedNoteIds: "" };
+                            }
+                            if (nextTaskId && taskEntity.TaskId === nextTaskId) {
+                                nextTask = { ...nextTask, linkedNoteIds: noteId };
+                            }
+                            syncTaskShadow(tasks, nextTask);
+                            return nextTask;
+                        });
+                    }
+
+                    for (const currentMission of Object.values(missions)) {
+                        currentMission.Notes = (currentMission.Notes || []).map((currentNote) => {
+                            if (currentNote.noteId === noteId) {
+                                return {
+                                    ...currentNote,
+                                    relatedTaskId: nextTaskId,
+                                    noteUpdatedAt: timestamp,
+                                };
+                            }
+                            if (nextTaskId && currentNote.relatedTaskId === nextTaskId) {
+                                return {
+                                    ...currentNote,
+                                    relatedTaskId: "",
+                                    noteUpdatedAt: timestamp,
+                                };
+                            }
+                            return currentNote;
+                        });
+                    }
+
+                    return { missions, boards, tasks };
+                });
+            },
 
             addSubTask: (boardId, taskId, subTask) => {
                 set((state) => ({
@@ -599,6 +902,9 @@ export const useWorkSpace = create<WorkSpaceProps>()(
                             ),
                         },
                     },
+                    missions: sanitizeMissionsAfterDeletion(state.missions, {
+                        removedSubTaskIds: new Set([subTaskId]),
+                    }),
                 }));
             },
             toggleSubTask: (boardId, taskId, subTaskId) => {
@@ -633,76 +939,126 @@ export const useWorkSpace = create<WorkSpaceProps>()(
             },
             linkSubTask: (boardId, taskId, subTaskId, noteId, blockId) => {
                 set((state) => {
-                    const nextBoards = {
-                        ...state.boards,
-                        [boardId]: {
-                            ...state.boards[boardId],
-                            Tasks: state.boards[boardId].Tasks.map(t =>
-                                t.TaskId === taskId
-                                    ? { ...t, subTasks: (t.subTasks ?? []).map(s => s.subTaskId === subTaskId ? { ...s, linkedNoteId: noteId, linkedBlockId: blockId } : s) }
-                                    : t
-                            ),
-                        },
-                    };
-                    let nextMissions = state.missions;
-                    if (blockId && noteId) {
-                        const missionId = Object.keys(state.missions).find(id =>
-                            state.missions[id].Notes.some(n => n.noteId === noteId)
-                        );
-                        if (missionId) {
-                            const mission = state.missions[missionId];
-                            nextMissions = {
-                                ...state.missions,
-                                [missionId]: {
-                                    ...mission,
-                                    Notes: mission.Notes.map(n =>
-                                        n.noteId === noteId
-                                            ? { ...n, blocks: n.blocks.map(b => b.blockId === blockId ? { ...b, linkedBoardId: boardId, linkedTaskId: taskId, linkedSubTaskId: subTaskId } : b) }
-                                            : n
-                                    )
-                                }
-                            };
+                    const board = state.boards[boardId];
+                    const taskIndex = board?.Tasks.findIndex((item) => item.TaskId === taskId) ?? -1;
+                    const subTaskIndex = taskIndex >= 0 ? (board?.Tasks[taskIndex].subTasks || []).findIndex((item) => item.subTaskId === subTaskId) : -1;
+                    if (!board || taskIndex < 0 || subTaskIndex < 0) return state;
+
+                    const nextNoteId = noteId || "";
+                    const nextBlockId = nextNoteId ? (blockId || "") : "";
+                    const missions = structuredClone(state.missions);
+                    const boards = structuredClone(state.boards);
+                    const tasks = structuredClone(state.tasks);
+
+                    const nextTask = boards[boardId].Tasks[taskIndex];
+                    const nextSubTask = nextTask.subTasks[subTaskIndex];
+
+                    if (nextSubTask.linkedNoteId && nextSubTask.linkedBlockId) {
+                        const previousBlockLocation = findBlockLocation(missions, nextSubTask.linkedNoteId, nextSubTask.linkedBlockId);
+                        if (previousBlockLocation) {
+                            const previousBlock = missions[previousBlockLocation.missionId].Notes[previousBlockLocation.noteIndex].blocks[previousBlockLocation.blockIndex];
+                            if (previousBlock.linkedSubTaskId === subTaskId) {
+                                previousBlock.linkedSubTaskId = "";
+                            }
                         }
                     }
-                    return { boards: nextBoards, missions: nextMissions };
+
+                    if (nextBlockId) {
+                        const targetBlockLocation = findBlockLocation(missions, nextNoteId, nextBlockId);
+                        if (!targetBlockLocation) return state;
+                        const targetBlock = missions[targetBlockLocation.missionId].Notes[targetBlockLocation.noteIndex].blocks[targetBlockLocation.blockIndex];
+
+                        if (targetBlock.linkedSubTaskId && targetBlock.linkedSubTaskId !== subTaskId) {
+                            const linkedSubTaskLocation = findSubTaskLocation(boards, targetBlock.linkedSubTaskId);
+                            if (linkedSubTaskLocation) {
+                                const linkedTask = boards[linkedSubTaskLocation.boardId].Tasks[linkedSubTaskLocation.taskIndex];
+                                const linkedSubTask = linkedTask.subTasks[linkedSubTaskLocation.subTaskIndex];
+                                if (linkedSubTask.linkedNoteId === nextNoteId && linkedSubTask.linkedBlockId === nextBlockId) {
+                                    linkedSubTask.linkedNoteId = "";
+                                    linkedSubTask.linkedBlockId = "";
+                                    syncTaskShadow(tasks, linkedTask);
+                                }
+                            }
+                        }
+
+                        targetBlock.linkedBoardId = boardId;
+                        targetBlock.linkedTaskId = taskId;
+                        targetBlock.linkedSubTaskId = subTaskId;
+                    }
+
+                    nextSubTask.linkedNoteId = nextNoteId;
+                    nextSubTask.linkedBlockId = nextBlockId;
+                    syncTaskShadow(tasks, nextTask);
+
+                    return { missions, boards, tasks };
                 });
             },
             linkBlock: (activeMissionId, noteId, blockId, boardId, taskId, subTaskId) => {
                 set((state) => {
-                    const mission = state.missions[activeMissionId];
-                    if (!mission) return state;
-                    const board = state.boards[boardId];
-                    if (!board || board.MissionId !== activeMissionId) return state;
-                    const task = board.Tasks.find(t => t.TaskId === taskId);
-                    if (!task) return state;
-                    const hasSubTask = subTaskId && (task.subTasks ?? []).some(s => s.subTaskId === subTaskId);
-                    const nextNotes = mission.Notes.map(n => {
-                        if (n.noteId !== noteId) return n;
-                        return {
-                            ...n,
-                            blocks: n.blocks.map(b =>
-                                b.blockId === blockId ? { ...b, linkedBoardId: boardId, linkedTaskId: taskId, linkedSubTaskId: subTaskId || "" } : b
-                            )
-                        };
-                    });
-                    let nextBoards = state.boards;
-                    if (hasSubTask) {
-                        nextBoards = {
-                            ...state.boards,
-                            [boardId]: {
-                                ...board,
-                                Tasks: board.Tasks.map(t =>
-                                    t.TaskId === taskId
-                                        ? { ...t, subTasks: (t.subTasks ?? []).map(s => s.subTaskId === subTaskId ? { ...s, linkedNoteId: noteId, linkedBlockId: blockId } : s) }
-                                        : t
-                                ),
-                            },
-                        };
+                    const blockLocation = findBlockLocation(state.missions, noteId, blockId);
+                    if (!blockLocation || blockLocation.missionId !== activeMissionId) return state;
+
+                    const nextBoardId = boardId || "";
+                    const nextTaskId = nextBoardId ? (taskId || "") : "";
+                    const nextSubTaskId = nextTaskId ? (subTaskId || "") : "";
+
+                    if (nextTaskId) {
+                        const taskLocation = findTaskLocation(state.boards, nextTaskId);
+                        if (!taskLocation || taskLocation.boardId !== nextBoardId) return state;
                     }
-                    return {
-                        missions: { ...state.missions, [activeMissionId]: { ...mission, Notes: nextNotes } },
-                        boards: nextBoards,
-                    };
+
+                    if (nextSubTaskId) {
+                        const selectedBoard = state.boards[nextBoardId];
+                        const selectedTask = selectedBoard?.Tasks.find((item) => item.TaskId === nextTaskId);
+                        if (!selectedTask || !(selectedTask.subTasks || []).some((item) => item.subTaskId === nextSubTaskId)) return state;
+                    }
+
+                    const missions = structuredClone(state.missions);
+                    const boards = structuredClone(state.boards);
+                    const tasks = structuredClone(state.tasks);
+
+                    const block = missions[blockLocation.missionId].Notes[blockLocation.noteIndex].blocks[blockLocation.blockIndex];
+
+                    if (block.linkedSubTaskId && block.linkedSubTaskId !== nextSubTaskId) {
+                        const previousSubTaskLocation = findSubTaskLocation(boards, block.linkedSubTaskId);
+                        if (previousSubTaskLocation) {
+                            const previousTask = boards[previousSubTaskLocation.boardId].Tasks[previousSubTaskLocation.taskIndex];
+                            const previousSubTask = previousTask.subTasks[previousSubTaskLocation.subTaskIndex];
+                            if (previousSubTask.linkedNoteId === noteId && previousSubTask.linkedBlockId === blockId) {
+                                previousSubTask.linkedNoteId = "";
+                                previousSubTask.linkedBlockId = "";
+                                syncTaskShadow(tasks, previousTask);
+                            }
+                        }
+                    }
+
+                    if (nextSubTaskId) {
+                        const targetBoard = boards[nextBoardId];
+                        const targetTaskIndex = targetBoard.Tasks.findIndex((item) => item.TaskId === nextTaskId);
+                        const targetTask = targetBoard.Tasks[targetTaskIndex];
+                        const targetSubTaskIndex = (targetTask.subTasks || []).findIndex((item) => item.subTaskId === nextSubTaskId);
+                        const targetSubTask = targetTask.subTasks[targetSubTaskIndex];
+
+                        if (targetSubTask.linkedNoteId && targetSubTask.linkedBlockId && !(targetSubTask.linkedNoteId === noteId && targetSubTask.linkedBlockId === blockId)) {
+                            const previousBlockLocation = findBlockLocation(missions, targetSubTask.linkedNoteId, targetSubTask.linkedBlockId);
+                            if (previousBlockLocation) {
+                                const previousBlock = missions[previousBlockLocation.missionId].Notes[previousBlockLocation.noteIndex].blocks[previousBlockLocation.blockIndex];
+                                if (previousBlock.linkedSubTaskId === nextSubTaskId) {
+                                    previousBlock.linkedSubTaskId = "";
+                                }
+                            }
+                        }
+
+                        targetSubTask.linkedNoteId = noteId;
+                        targetSubTask.linkedBlockId = blockId;
+                        syncTaskShadow(tasks, targetTask);
+                    }
+
+                    block.linkedBoardId = nextBoardId;
+                    block.linkedTaskId = nextTaskId;
+                    block.linkedSubTaskId = nextSubTaskId;
+
+                    return { missions, boards, tasks };
                 });
             },
 
@@ -711,10 +1067,27 @@ export const useWorkSpace = create<WorkSpaceProps>()(
                 return note;
             },
             deleteNote: (activeMissionId, noteId) => {
-                set((state) => ({
-                    currentNoteId: state.currentNoteId === noteId ? null : state.currentNoteId,
-                    missions: { ...state.missions, [activeMissionId]: { ...state.missions[activeMissionId], Notes: state.missions[activeMissionId].Notes.filter(n => n.noteId !== noteId), activeNoteId: state.missions[activeMissionId].activeNoteId === noteId ? null : state.missions[activeMissionId].activeNoteId } }
-                }));
+                set((state) => {
+                    const mission = state.missions[activeMissionId];
+                    const note = mission?.Notes.find((item) => item.noteId === noteId);
+                    const removedBlockIds = new Set<string>((note?.blocks || []).map((block) => block.blockId));
+
+                    return {
+                        currentNoteId: state.currentNoteId === noteId ? null : state.currentNoteId,
+                        missions: {
+                            ...state.missions,
+                            [activeMissionId]: {
+                                ...state.missions[activeMissionId],
+                                Notes: state.missions[activeMissionId].Notes.filter(n => n.noteId !== noteId),
+                                activeNoteId: state.missions[activeMissionId].activeNoteId === noteId ? null : state.missions[activeMissionId].activeNoteId,
+                            },
+                        },
+                        boards: sanitizeBoardsAfterDeletion(state.boards, {
+                            removedNoteIds: new Set([noteId]),
+                            removedBlockIds,
+                        }),
+                    };
+                });
             },
             RenameNote: (activeMissionId, noteId, newName) => {
                 set((state) => ({ missions: { ...state.missions, [activeMissionId]: { ...state.missions[activeMissionId], Notes: state.missions[activeMissionId].Notes.map(n => n.noteId === noteId ? { ...n, noteTitle: newName } : n) } } }));
@@ -785,7 +1158,10 @@ export const useWorkSpace = create<WorkSpaceProps>()(
                                         : n
                                 )
                             }
-                        }
+                        },
+                        boards: sanitizeBoardsAfterDeletion(state.boards, {
+                            removedBlockIds: new Set([blockId]),
+                        }),
                     };
                 });
             },

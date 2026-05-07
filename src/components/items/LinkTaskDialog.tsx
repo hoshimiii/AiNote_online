@@ -1,32 +1,19 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Button } from "../ui/button";
-import { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../ui/dialog";
-import { type Note as NoteType, type Task } from "@/store/kanban";
-
-interface Mission {
-    MissionId: string;
-    [key: string]: string | number | boolean | object | undefined | null;
-}
-
-interface Board {
-    MissionId: string;
-    Tasks?: Task[];
-    [key: string]: string | Task[] | undefined | Record<string, unknown>;
-}
+import { type Board, type Note as NoteType, type Task } from "@/store/kanban";
+import { LinkManagerSheet } from "./LinkManagerSheet";
 
 interface LinkTaskDialogProps {
     note: NoteType;
     activeMissionId: string;
-    missions: Record<string, Mission>;
     boards: Record<string, Board>;
-    onConfirm: (note: NoteType | null, taskId: string | null) => void;
+    onConfirm: (taskId: string) => void;
     trigger?: React.ReactNode;
 }
 
 export const LinkTaskDialog = ({
     note,
     activeMissionId,
-    missions,
     boards,
     onConfirm,
     trigger
@@ -34,59 +21,75 @@ export const LinkTaskDialog = ({
     const [open, setOpen] = useState(false);
     const [selectedTaskId, setSelectedTaskId] = useState<string>(note?.relatedTaskId ?? "");
 
-    const currentMission = missions?.[activeMissionId];
-    if (!currentMission) return null;
+    const taskOptions = useMemo(
+        () => Object.values(boards)
+            .filter((board) => board.MissionId === activeMissionId)
+            .flatMap((board) => (board.Tasks || []).map((task: Task) => ({
+                boardId: board.BoardId,
+                boardTitle: board.title,
+                taskId: task.TaskId,
+                taskTitle: task.title,
+                subTaskCount: (task.subTasks || []).length,
+            }))),
+        [activeMissionId, boards]
+    );
 
-    const allTasks: Task[] = [];
-    Object.values(boards).forEach((board: Board) => {
-        if (board.MissionId === activeMissionId && board.Tasks) {
-            allTasks.push(...board.Tasks);
-        }
-    });
+    const currentTask = taskOptions.find((task) => task.taskId === note.relatedTaskId);
+    const selectedTask = taskOptions.find((task) => task.taskId === selectedTaskId);
 
-    const handleSave = () => {
-        onConfirm(note ?? null, selectedTaskId || null);
-        setOpen(false);
-    };
+    const currentSummary = (
+        <div className="space-y-1 text-sm">
+            <div className="font-medium">{note.noteTitle}</div>
+            <div className="text-muted-foreground">
+                {currentTask ? `已关联到 ${currentTask.boardTitle} / ${currentTask.taskTitle}` : "当前未关联到 Task"}
+            </div>
+        </div>
+    );
+
+    const preview = selectedTask ? (
+        <div className="space-y-2 text-sm">
+            <div>
+                <div className="font-medium">{selectedTask.taskTitle}</div>
+                <div className="text-muted-foreground">{selectedTask.boardTitle}</div>
+            </div>
+            <div className="text-xs text-muted-foreground">包含 {selectedTask.subTaskCount} 个子任务</div>
+        </div>
+    ) : (
+        <div className="text-sm text-muted-foreground">选择 Task 后，这里会显示它所在的 Board 与子任务数量。</div>
+    );
 
     return (
-        <Dialog open={open} onOpenChange={setOpen}>
-            <DialogTrigger asChild onClick={(e) => e.stopPropagation()}>
-                {trigger || <Button className="cursor-pointer" variant="ghost" size="sm">Link to Task</Button>}
-            </DialogTrigger>
-            <DialogContent onClick={(e) => e.stopPropagation()}>
-                <DialogHeader>
-                    <DialogTitle>Link Note to Task</DialogTitle>
-                </DialogHeader>
-                <div className="space-y-4">
-                    <div className="text-sm text-muted-foreground">
-                        Select a task from current mission boards
-                    </div>
-                    <select
-                        value={selectedTaskId}
-                        onChange={(e) => setSelectedTaskId(e.target.value)}
-                        className="w-full p-2 border rounded-md"
-                    >
-                        <option value="">-- No task selected --</option>
-                        {allTasks.map(task => (
-                            <option key={task.TaskId} value={task.TaskId}>
-                                {task.title}
-                            </option>
-                        ))}
-                    </select>
-                    <div className="text-xs text-muted-foreground">
-                        {note?.relatedTaskId ? `Currently linked to: ${allTasks.find(t => t.TaskId === note?.relatedTaskId)?.title || note?.relatedTaskId}` : 'No task linked'}
-                    </div>
-                </div>
-                <DialogFooter>
-                    <Button className="cursor-pointer" variant="outline" onClick={() => setOpen(false)}>
-                        Cancel
-                    </Button>
-                    <Button className="cursor-pointer" variant="outline" onClick={handleSave}>
-                        Save
-                    </Button>
-                </DialogFooter>
-            </DialogContent>
-        </Dialog>
+        <LinkManagerSheet
+            open={open}
+            onOpenChange={(nextOpen) => {
+                setOpen(nextOpen);
+                if (nextOpen) {
+                    setSelectedTaskId(note.relatedTaskId ?? "");
+                }
+            }}
+            title="管理 Note 与 Task 关联"
+            description="为当前 Note 选择一个主 Task；保存时会由 store 统一同步镜像字段。"
+            currentSummary={currentSummary}
+            preview={preview}
+            onSave={() => onConfirm(selectedTaskId)}
+            onClear={() => setSelectedTaskId("")}
+            trigger={trigger || <Button className="cursor-pointer" variant="ghost" size="sm">Link to Task</Button>}
+        >
+            <div className="space-y-2">
+                <div className="text-xs font-medium text-muted-foreground">选择 Task</div>
+                <select
+                    value={selectedTaskId}
+                    onChange={(event) => setSelectedTaskId(event.target.value)}
+                    className="w-full rounded-md border p-2 text-sm"
+                >
+                    <option value="">-- 暂不关联 --</option>
+                    {taskOptions.map((task) => (
+                        <option key={task.taskId} value={task.taskId}>
+                            {task.boardTitle} / {task.taskTitle}
+                        </option>
+                    ))}
+                </select>
+            </div>
+        </LinkManagerSheet>
     );
 };

@@ -80,6 +80,19 @@ function missionOrder(state: Snapshot, workspaceId: string) {
   return ((state.missionOrder as Record<string, string[]>)[workspaceId] ?? []) as string[]
 }
 
+function listWorkspacesImpl(state: Snapshot) {
+  const workspaces = state.workspaces as { workspaceId: string; workspaceName: string }[]
+  const activeWorkSpaceId = typeof state.activeWorkSpaceId === "string" ? (state.activeWorkSpaceId as string) : undefined
+  return workspaces.map((w) => ({
+    id: w.workspaceId,
+    workspaceId: w.workspaceId,
+    name: w.workspaceName,
+    title: w.workspaceName,
+    workspaceName: w.workspaceName,
+    isCurrent: w.workspaceId === activeWorkSpaceId,
+  }))
+}
+
 function getOrderedBoards(state: Snapshot, missionId: string): Board[] {
   const boards = boardsMap(state)
   const orderedIds = boardOrder(state, missionId)
@@ -243,10 +256,7 @@ export async function dispatch(
 ): Promise<unknown> {
   switch (toolName) {
     case "list_workspaces":
-      return readSnapshot(userId, (state) => {
-        const workspaces = state.workspaces as { workspaceId: string; workspaceName: string }[]
-        return workspaces.map((w) => ({ workspaceId: w.workspaceId, workspaceName: w.workspaceName }))
-      })
+      return readSnapshot(userId, (state) => listWorkspacesImpl(state))
     case "list_missions":
       return readSnapshot(userId, (state) => listMissionsImpl(state, args.workspaceId as string | undefined))
     case "list_boards":
@@ -455,7 +465,6 @@ export async function dispatch(
           state = { ...state, boards, tasks }
         }
         const b2 = boardsMap(state)[boardId]!
-        const taskRef = (b2.Tasks ?? []).find((t) => t.TaskId === taskId)!
         const subTaskId = nanoid()
         const sub: SubTask = {
           subTaskId,

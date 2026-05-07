@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Button } from "../ui/button";
-import { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../ui/dialog";
 import type { Note } from "@/store/kanban";
+import { LinkManagerSheet } from "./LinkManagerSheet";
 
 interface LinkSubTaskDialogProps {
     notes: Note[];
@@ -25,15 +25,12 @@ export const LinkSubTaskDialog = ({
     const [selectedBlockId, setSelectedBlockId] = useState(currentBlockId || "");
 
     const selectedNote = notes.find(n => n.noteId === selectedNoteId);
+    const currentNote = notes.find(n => n.noteId === currentNoteId);
+    const currentBlock = currentNote?.blocks.find((block) => block.blockId === currentBlockId);
 
     const handleNoteChange = (noteId: string) => {
         setSelectedNoteId(noteId);
         setSelectedBlockId("");
-    };
-
-    const handleSave = () => {
-        onConfirm(selectedNoteId, selectedBlockId);
-        setOpen(false);
     };
 
     const getBlockPreview = (content: string) => {
@@ -42,65 +39,98 @@ export const LinkSubTaskDialog = ({
     };
 
     return (
-        <Dialog open={open} onOpenChange={(o) => {
-            setOpen(o);
-            if (o) {
-                setSelectedNoteId(currentNoteId || "");
-                setSelectedBlockId(currentBlockId || "");
-            }
-        }}>
-            <DialogTrigger asChild onClick={(e) => e.stopPropagation()}>
-                {trigger || <Button variant="ghost" size="sm">Link</Button>}
-            </DialogTrigger>
-            <DialogContent onClick={(e) => e.stopPropagation()}>
-                <DialogHeader>
-                    <DialogTitle>链接到 Note Block</DialogTitle>
-                </DialogHeader>
-                <div className="space-y-3">
-                    <div>
-                        <div className="text-xs text-muted-foreground mb-1">选择 Note</div>
-                        <select
-                            value={selectedNoteId}
-                            onChange={(e) => handleNoteChange(e.target.value)}
-                            className="w-full p-2 border rounded-md text-sm"
-                        >
-                            <option value="">-- 不链接 --</option>
-                            {notes.map(note => (
-                                <option key={note.noteId} value={note.noteId}>
-                                    {note.noteTitle}
-                                </option>
-                            ))}
-                        </select>
-                    </div>
-                    {selectedNote && (
-                        <div>
-                            <div className="text-xs text-muted-foreground mb-1">选择 Block（标题）</div>
-                            <select
-                                value={selectedBlockId}
-                                onChange={(e) => setSelectedBlockId(e.target.value)}
-                                className="w-full p-2 border rounded-md text-sm"
-                            >
-                                <option value="">-- 只链接 Note --</option>
-                                {selectedNote.blocks.map(block => (
-                                    <option key={block.blockId} value={block.blockId}>
-                                        [{block.blockType}] {getBlockPreview(block.blockContent)}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-                    )}
-                    {onCreateNote && (
-                        <Button variant="outline" size="sm" onClick={() => {
-                            const newId = onCreateNote();
-                            if (newId) setSelectedNoteId(newId);
-                        }}>新建笔记</Button>
-                    )}
+        <LinkManagerSheet
+            open={open}
+            onOpenChange={(nextOpen) => {
+                setOpen(nextOpen);
+                if (nextOpen) {
+                    setSelectedNoteId(currentNoteId || "");
+                    setSelectedBlockId(currentBlockId || "");
+                }
+            }}
+            title="管理 SubTask 与 Note/Block 关联"
+            description="可以只关联 Note，也可以进一步精确到某个 Block。"
+            currentSummary={
+                <div className="space-y-1 text-sm">
+                    <div className="font-medium">{currentNote ? currentNote.noteTitle : "当前未关联 Note"}</div>
+                    <div className="text-muted-foreground">{currentBlock ? `Block：${getBlockPreview(currentBlock.blockContent)}` : "当前未关联具体 Block"}</div>
                 </div>
-                <DialogFooter>
-                    <Button variant="outline" onClick={() => setOpen(false)}>取消</Button>
-                    <Button variant="outline" onClick={handleSave}>确定</Button>
-                </DialogFooter>
-            </DialogContent>
-        </Dialog>
+            }
+            preview={selectedNote ? (
+                <div className="space-y-3 text-sm">
+                    <div>
+                        <div className="font-medium">{selectedNote.noteTitle}</div>
+                        <div className="text-muted-foreground">{selectedNote.blocks.length} 个 Block</div>
+                    </div>
+                    <div className="space-y-2">
+                        {selectedNote.blocks.length > 0 ? selectedNote.blocks.map((block) => (
+                            <div
+                                key={block.blockId}
+                                className={`rounded-lg border p-2 text-xs ${block.blockId === selectedBlockId ? "border-blue-500 bg-blue-50 text-blue-700" : "border-border text-muted-foreground"}`}
+                            >
+                                [{block.blockType}] {getBlockPreview(block.blockContent)}
+                            </div>
+                        )) : <div className="text-sm text-muted-foreground">该 Note 暂无 Block。</div>}
+                    </div>
+                </div>
+            ) : (
+                <div className="text-sm text-muted-foreground">选择 Note 后，这里会显示其 Block 列表与摘要。</div>
+            )}
+            onSave={() => onConfirm(selectedNoteId, selectedBlockId)}
+            onClear={() => {
+                setSelectedNoteId("");
+                setSelectedBlockId("");
+            }}
+            trigger={trigger || <Button variant="ghost" size="sm">Link</Button>}
+        >
+            <div className="space-y-2">
+                <div className="text-xs font-medium text-muted-foreground">选择 Note</div>
+                <select
+                    value={selectedNoteId}
+                    onChange={(event) => handleNoteChange(event.target.value)}
+                    className="w-full rounded-md border p-2 text-sm"
+                >
+                    <option value="">-- 暂不关联 --</option>
+                    {notes.map((note) => (
+                        <option key={note.noteId} value={note.noteId}>
+                            {note.noteTitle}
+                        </option>
+                    ))}
+                </select>
+            </div>
+
+            {selectedNote ? (
+                <div className="space-y-2">
+                    <div className="text-xs font-medium text-muted-foreground">选择 Block</div>
+                    <select
+                        value={selectedBlockId}
+                        onChange={(event) => setSelectedBlockId(event.target.value)}
+                        className="w-full rounded-md border p-2 text-sm"
+                    >
+                        <option value="">-- 仅关联 Note --</option>
+                        {selectedNote.blocks.map((block) => (
+                            <option key={block.blockId} value={block.blockId}>
+                                [{block.blockType}] {getBlockPreview(block.blockContent)}
+                            </option>
+                        ))}
+                    </select>
+                </div>
+            ) : null}
+
+            {onCreateNote ? (
+                <div className="rounded-lg border border-dashed p-3">
+                    <div className="mb-2 text-xs font-medium text-muted-foreground">快速操作</div>
+                    <Button variant="outline" size="sm" onClick={() => {
+                        const newId = onCreateNote();
+                        if (newId) {
+                            setSelectedNoteId(newId);
+                            setSelectedBlockId("");
+                        }
+                    }}>
+                        新建笔记
+                    </Button>
+                </div>
+            ) : null}
+        </LinkManagerSheet>
     );
 };

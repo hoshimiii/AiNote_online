@@ -164,7 +164,10 @@ const tools: Tool[] = [
             const state = useWorkSpace.getState();
             return JSON.stringify(
                 state.workspaces.map((workspace) => ({
+                    id: workspace.workspaceId,
                     workspaceId: workspace.workspaceId,
+                    name: workspace.workspaceName,
+                    title: workspace.workspaceName,
                     workspaceName: workspace.workspaceName,
                     isCurrent: workspace.workspaceId === state.activeWorkSpaceId,
                 }))

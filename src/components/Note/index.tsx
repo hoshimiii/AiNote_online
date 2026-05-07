@@ -1,4 +1,4 @@
-import { useWorkSpace, type Note as NoteType, type Mission } from "@/store/kanban";
+import { useWorkSpace, type Note as NoteType } from "@/store/kanban";
 import { useState, useEffect, useRef } from "react";
 import { Button } from "../ui/button";
 import { DeleteDialog } from "../items/DeleteDialog";
@@ -23,7 +23,7 @@ export const NoteItem = ({ note, nowmission }: { note: NoteType, nowmission: str
 
         window.addEventListener('popstate', handlePopState);
         return () => window.removeEventListener('popstate', handlePopState);
-    }, []);
+    }, [nowmission, setActiveNote]);
     return (
         <div className="flex flex-col text-xs p-0.5 ml-1 h-auto leading-none">
             <div className="flex justify-between items-center">
@@ -52,7 +52,7 @@ export const NoteItem = ({ note, nowmission }: { note: NoteType, nowmission: str
 
 
 export const Note = ({ note, activeMissionId, scrollToBlockId }: { note: NoteType, activeMissionId: string, scrollToBlockId?: string }) => {
-    const { missions, boards, boardOrder, updateNote, createBlock, insertBlock, deleteBlock, updateBlock, setLinkedNoteIds, linkBlock, addSubTask, updataBoard } = useWorkSpace();
+    const { boards, boardOrder, updateNote, createBlock, insertBlock, deleteBlock, updateBlock, setNoteTaskLink, linkBlock, addSubTask, updataBoard } = useWorkSpace();
     const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const [localContents, setLocalContents] = useState<Record<string, string>>(() => {
@@ -85,19 +85,6 @@ export const Note = ({ note, activeMissionId, scrollToBlockId }: { note: NoteTyp
     const handleBlockChange = (blockId: string, content: string) => {
         setLocalContents(prev => ({ ...prev, [blockId]: content }));
     };
-
-    const handleSave = () => {
-        const updatedNote: NoteType = {
-            ...note,
-            blocks: note?.blocks?.map(b => ({
-                ...b,
-                blockContent: localContents[b.blockId] ?? b.blockContent,
-                blockUpdatedAt: new Date().toISOString(),
-            })),
-            noteUpdatedAt: new Date().toISOString(),
-        };
-        updateNote(activeMissionId, note?.noteId ?? '', updatedNote);
-    };
     //防抖保存机制
     useEffect(() => {
         const hasChanged = note.blocks.some(
@@ -128,24 +115,6 @@ export const Note = ({ note, activeMissionId, scrollToBlockId }: { note: NoteTyp
     );
     const allBoards = [...(orderedBoardIds.map((id: string) => boardMap[id]).filter(Boolean)), ...Object.values(boards).filter((b) => b.MissionId === activeMissionId && !orderedBoardIds.includes(b.BoardId))];
 
-    const handleLinkTask = (note: NoteType | null, taskId: string | null) => {
-        if (!note) return;
-        if (note.relatedTaskId) {
-            const oldBoard = Object.values(boards).find(b => b.Tasks.some(t => t.TaskId === note.relatedTaskId));
-            if (oldBoard) setLinkedNoteIds(oldBoard.BoardId, note.relatedTaskId, "");
-        }
-        const updatedNote: NoteType = {
-            ...note,
-            relatedTaskId: taskId || "",
-            noteUpdatedAt: new Date().toISOString(),
-        };
-        updateNote(activeMissionId, note.noteId, updatedNote);
-        if (taskId) {
-            const newBoard = Object.values(boards).find(b => b.Tasks.some(t => t.TaskId === taskId));
-            if (newBoard) setLinkedNoteIds(newBoard.BoardId, taskId, note.noteId);
-        }
-    };
-
     return (
         <div className="p-4">
             <div className="flex justify-between items-baseline mb-4">
@@ -153,9 +122,8 @@ export const Note = ({ note, activeMissionId, scrollToBlockId }: { note: NoteTyp
                 <LinkTaskDialog
                     note={note}
                     activeMissionId={activeMissionId}
-                    missions={missions}
                     boards={boards}
-                    onConfirm={handleLinkTask}
+                    onConfirm={(taskId) => setNoteTaskLink(activeMissionId, note.noteId, taskId)}
                     trigger={<Button variant="ghost" size="sm">Link to Task</Button>}
                 />
             </div>

@@ -11,7 +11,7 @@ import { SortableContext, verticalListSortingStrategy, horizontalListSortingStra
 
 
 export const Board = ({ nowMissionId, setActiveNoteId }: { nowMissionId: string, setActiveNoteId: (noteId: string, blockId?: string) => void }) => {
-    const { missions, boards, boardOrder, deleteBoard, RenameBoard, updataBoard, deleteTask, setLinkedNoteIds, updateNote } = useWorkSpace();
+    const { missions, boards, boardOrder, deleteBoard, RenameBoard, updataBoard, deleteTask, setNoteTaskLink } = useWorkSpace();
     const activeMissionId = nowMissionId;
     const orderedBoardIds = boardOrder[activeMissionId] ?? [];
     const boardMap = Object.fromEntries(
@@ -68,24 +68,13 @@ export const Board = ({ nowMissionId, setActiveNoteId }: { nowMissionId: string,
                                                         trigger={<Button variant="ghost" size="icon" className="cursor-pointer h-fit w-6"><TrashIcon className="w-4 h-4 text-red-500" /></Button>}
                                                     />
                                                     <LinkNoteDialog
-                                                        noteIds={missions[activeMissionId].Notes.map(note => note.noteId)}
-                                                        TaskId={task.TaskId}
-                                                        BoardId={board.BoardId}
-                                                        activeMissionId={activeMissionId}
-                                                        missions={missions}
-                                                        boards={allBoards}
-                                                        onConfirm={(BoardId: string, taskId: string, noteId: string) => {
-                                                            const missionId = boards[BoardId]?.MissionId;
-                                                            const currentTask = boards[BoardId]?.Tasks.find(t => t.TaskId === taskId);
-                                                            if (missionId && currentTask?.linkedNoteIds) {
-                                                                const oldNote = missions[missionId]?.Notes.find(n => n.noteId === currentTask.linkedNoteIds);
-                                                                if (oldNote) updateNote(missionId, oldNote.noteId, { ...oldNote, relatedTaskId: "", noteUpdatedAt: new Date().toISOString() });
-                                                            }
-                                                            setLinkedNoteIds(BoardId, taskId, noteId);
-                                                            if (noteId && missionId) {
-                                                                const note = missions[missionId]?.Notes.find(n => n.noteId === noteId);
-                                                                if (note) updateNote(missionId, noteId, { ...note, relatedTaskId: taskId, noteUpdatedAt: new Date().toISOString() });
-                                                            }
+                                                        notes={missions[activeMissionId].Notes}
+                                                        currentNoteId={task.linkedNoteIds}
+                                                        taskTitle={task.title}
+                                                        onConfirm={(noteId: string) => {
+                                                            const nextNoteId = noteId || task.linkedNoteIds;
+                                                            if (!nextNoteId) return;
+                                                            setNoteTaskLink(activeMissionId, nextNoteId, noteId ? task.TaskId : "");
                                                         }}
                                                         trigger={<Button variant="ghost" size="icon" className="cursor-pointer h-fit w-6"><LinkIcon className="w-4 h-4 text-blue-500" /></Button>}
                                                     />

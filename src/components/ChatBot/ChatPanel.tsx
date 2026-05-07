@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 
+import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 
@@ -51,7 +52,7 @@ function CollapsibleTraceBlock({
             </button>
             {open ? (
                 <div className="max-h-64 overflow-y-auto border-t border-amber-200/70 px-2.5 py-2 text-xs leading-relaxed [&_.katex-display]:max-w-full [&_.katex-display]:overflow-x-auto">
-                    <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                    <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
                         {body}
                     </ReactMarkdown>
                 </div>
@@ -65,9 +66,9 @@ interface ChatPanelProps {
     FloatMode: string | number;
 }
 
-export function ChatPanel({ activeChatbotId: _activeChatbotId, FloatMode }: ChatPanelProps) {
+export function ChatPanel({ FloatMode }: ChatPanelProps) {
     // useChat 会自动处理消息状态、输入框状态、以及流式请求
-    const { messages, handleSubmit, isLoading } = useChatbot();
+    const { messages, input, handleInputChange, handleSubmit, isLoading } = useChatbot();
     const scrollRef = useRef<HTMLDivElement>(null);
     // 自动滚动逻辑：每当有新消息（包括流式输出的字）时，滚动到底部
     useEffect(() => {
@@ -78,7 +79,6 @@ export function ChatPanel({ activeChatbotId: _activeChatbotId, FloatMode }: Chat
             }
         }
     }, [messages]);
-    const inputRef = useRef<HTMLTextAreaElement>(null);
 
     return (
         <div className="flex h-full min-h-0 flex-col bg-background">
@@ -132,7 +132,7 @@ export function ChatPanel({ activeChatbotId: _activeChatbotId, FloatMode }: Chat
                                 )}
                             >
                                 <div className="min-w-0 whitespace-pre-wrap [&_.katex-display]:max-w-full [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden">
-                                    <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                                    <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
                                         {isLoading && (m.role === "assistant" || m.role === "chatbot") && !m.messageContent
                                             ? "正在思考..."
                                             : m.messageContent.replace(/\\n/g, "\n")}
@@ -159,20 +159,17 @@ export function ChatPanel({ activeChatbotId: _activeChatbotId, FloatMode }: Chat
             {/* 2. 输入区域 */}
             <div className="shrink-0 border-t bg-background p-4">
                 <form
-                    onSubmit={(e) => handleSubmit(e, inputRef.current?.value ?? '')}
+                    onSubmit={(e) => handleSubmit(e, input)}
                     className="relative flex items-center gap-2">
                     <textarea
                         rows={1}
-                        ref={inputRef}
-                        // onChange={(e) => handleInputChange(e)}
+                        value={input}
+                        onChange={handleInputChange}
                         placeholder="输入消息..."
                         onKeyDown={(e) => {
                             if (e.key === "Enter" && !e.shiftKey) {
                                 e.preventDefault();
-                                handleSubmit(e, inputRef.current?.value ?? '');
-                                if (inputRef.current) {
-                                    inputRef.current.value = '';
-                                }
+                                handleSubmit(e, input);
                             }
                         }}
                         className="flex-1 min-h-[40px] max-h-32 p-3 bg-muted/50 border rounded-xl resize-none focus:outline-none focus:ring-2 focus:ring-primary/20 text-sm transition-all"
@@ -181,7 +178,7 @@ export function ChatPanel({ activeChatbotId: _activeChatbotId, FloatMode }: Chat
                         type="submit"
                         size="icon"
 
-                        disabled={isLoading || !inputRef.current?.value.trim()}
+                        disabled={isLoading || !input.trim()}
                         className="shrink-0 rounded-xl text-gray-900"
                     >
                         {isLoading ? <Loader2 className="animate-spin" /> : <Send size={18} />}
