@@ -69,6 +69,7 @@ export const LinkManagerSheet = ({
                         <Button
                             type="button"
                             variant="outline"
+                            className="cursor-pointer"
                             onClick={() => {
                                 onClear();
                                 handleClose();
@@ -77,11 +78,13 @@ export const LinkManagerSheet = ({
                             {clearLabel}
                         </Button>
                     ) : null}
-                    <Button type="button" variant="outline" onClick={handleClose}>
+                    <Button type="button" variant="outline" className="cursor-pointer" onClick={handleClose}>
                         取消
                     </Button>
                     <Button
                         type="button"
+                        variant="outline"
+                        className="cursor-pointer"
                         onClick={() => {
                             onSave();
                             handleClose();
