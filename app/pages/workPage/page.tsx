@@ -262,7 +262,7 @@ export const WorkPage = () => {
                                                 </SidebarMenuAction>
                                             </div>
                                             {mission.MissionId === displayedMissionId && (
-                                                <SidebarMenuSub className="group/sub-menu-item flex-col bg-gray-200 rounded-md p-1 mt-1 h-fit" key={'notes'}>
+                                                <SidebarMenuSub className="group/sub-menu-item flex-col bg-gray-200 rounded-md p-1 mt-1 h-fit cursor-pointer" key={'notes'}>
                                                     <SidebarContent>
                                                         {mission.Notes?.map((note) => (
                                                             <SidebarMenuItem key={note.noteId} className="h-auto py-0.5" onClick={() => handleClicknote(mission.MissionId, note.noteId)}>

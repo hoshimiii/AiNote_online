@@ -3,7 +3,6 @@ import { useState, useEffect, useRef } from "react";
 import { Button } from "../ui/button";
 import { DeleteDialog } from "../items/DeleteDialog";
 import { RenameDialog } from "../items/RenameDialog";
-import { SidebarMenuAction } from "../ui/sidebar";
 import { TrashIcon, LinkIcon, PlusIcon } from "lucide-react";
 import { PencilIcon } from "lucide-react";
 import { Block } from "./Block";
@@ -25,27 +24,22 @@ export const NoteItem = ({ note, nowmission }: { note: NoteType, nowmission: str
         return () => window.removeEventListener('popstate', handlePopState);
     }, [nowmission, setActiveNote]);
     return (
-        <div className="flex flex-col text-xs p-0.5 ml-1 h-auto leading-none">
-            <div className="flex justify-between items-center">
-                {note.noteTitle}
-                <div className="flex items-end">
-                    <SidebarMenuAction asChild>
-                        <DeleteDialog
-                            title="确定要删除任务吗?"
-                            description="此操作无法撤销，相关数据将永久消失"
-                            onConfirm={() => deleteNote(nowmission, note.noteId)}
-                            trigger={<Button variant="ghost" size="sm" className="cursor-pointer group-hover/menu-item:block hidden"><TrashIcon className="w-4 h-4 text-red-500" /></Button>} />
-
-                    </SidebarMenuAction>
-                    <SidebarMenuAction asChild>
-                        <RenameDialog
-                            title="重命名?"
-                            initialName={note.noteTitle}
-                            onConfirm={(newName) => RenameNote(nowmission, note.noteId, newName)}
-                            trigger={<Button variant="ghost" size="sm" className="cursor-pointer group-hover/menu-item:block hidden"><PencilIcon className="w-4 h-4 text-blue-500" /></Button>} />
-                    </SidebarMenuAction>
+        <div className="group/note-item ml-1 flex h-8 items-center justify-between gap-1 px-1 text-xs leading-none">
+            <div className="min-w-0 flex-1 truncate">{note.noteTitle}</div>
+            <div className="flex h-8 items-center gap-0.5 opacity-0 pointer-events-none transition-opacity group-hover/note-item:opacity-100 group-hover/note-item:pointer-events-auto group-focus-within/note-item:opacity-100 group-focus-within/note-item:pointer-events-auto">
+                <DeleteDialog
+                    title="确定要删除任务吗?"
+                    description="此操作无法撤销，相关数据将永久消失"
+                    onConfirm={() => deleteNote(nowmission, note.noteId)}
+                    trigger={<Button variant="ghost" size="icon-sm" className="cursor-pointer h-8 w-8 text-red-500 hover:text-red-600"><TrashIcon className="w-4 h-4" /></Button>}
+                />
+                <RenameDialog
+                    title="重命名?"
+                    initialName={note.noteTitle}
+                    onConfirm={(newName) => RenameNote(nowmission, note.noteId, newName)}
+                    trigger={<Button variant="ghost" size="icon-sm" className="cursor-pointer h-8 w-8 text-blue-500 hover:text-blue-600"><PencilIcon className="w-4 h-4" /></Button>}
+                />
                 </div>
-            </div>
         </div>
     )
 }

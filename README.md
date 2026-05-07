@@ -61,6 +61,34 @@
 
 ---
 
+## 📈 首屏性能观测
+
+项目现在内置了一个轻量的 Web Vitals 首屏观测面板：
+
+- 采集指标：`FCP` 与 `LCP`
+- 首屏参考值：优先使用 `LCP`，在 `LCP` 还未产出前回退到 `FCP`
+- 接入方式：根布局中的独立客户端监测组件，不影响其余服务端渲染结构
+
+### 如何查看
+
+- 开发环境：运行 `pnpm dev` 后，打开页面会自动显示右下角调试面板。
+- 生产环境：在页面 URL 后追加 `?vitals=1`，即可临时显示同一块面板。
+
+### 编程式访问
+
+- 当前快照：`window.__AINOTE_WEB_VITALS__`
+- 订阅更新：
+
+```ts
+window.addEventListener("ainote:web-vitals", (event) => {
+    console.log(event.detail)
+})
+```
+
+这为后续接入自建 analytics API、埋点平台或可视化 dashboard 留出了扩展点。
+
+---
+
 ## 🚀 快速开始
 ### 方法一
 ### 前置依赖

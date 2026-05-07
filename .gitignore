@@ -51,3 +51,6 @@ next-env.d.ts
 .vscode/mcp.json
 /mcp-bridge/node_modules
 /mcp-bridge/.env
+
+opspec
+**/openspec

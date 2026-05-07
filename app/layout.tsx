@@ -4,6 +4,7 @@ import { auth } from "@/lib/auth"
 import { SessionProvider } from "@/components/auth/SessionProvider"
 import { ZustandRehydrate } from "@/components/ZustandRehydrate"
 import { CloudSync } from "@/components/auth/CloudSync"
+import { WebVitalsMonitor } from "@/components/performance/WebVitalsMonitor"
 import "./globals.css"
 
 const geistSans = Geist({
@@ -37,6 +38,7 @@ export default async function RootLayout({
     >
       <body className="min-h-full flex flex-col bg-background font-sans text-foreground antialiased">
         <SessionProvider session={session}>
+          <WebVitalsMonitor />
           {/* ZustandRehydrate：等 zustand persist 从 localStorage 恢复完毕后再渲染子树 */}
           <ZustandRehydrate>
             {/* CloudSync：在 zustand 恢复后对比云端数据，按需拉取或推送 */}
