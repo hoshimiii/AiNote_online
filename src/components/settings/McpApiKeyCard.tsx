@@ -6,13 +6,14 @@ import { generateMcpApiKey, getMcpApiKeyStatus } from "@/lib/actions"
 
 export function McpApiKeyCard() {
   const [hasKey, setHasKey] = useState(false)
+  const [migrationPrefix, setMigrationPrefix] = useState("")
   const [shownKey, setShownKey] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
   const refresh = () => {
     getMcpApiKeyStatus()
-      .then((s) => setHasKey(s.hasKey))
+      .then((s) => { setHasKey(s.hasKey); setMigrationPrefix(s.migrationPrefix ?? "") })
       .catch(() => setHasKey(false))
   }
 
@@ -46,7 +47,7 @@ export function McpApiKeyCard() {
         用于本地 MCP Bridge 访问当前账号的云端看板。密钥仅生成时显示一次，请妥善保存。
       </p>
       {hasKey && !shownKey && (
-        <p className="text-xs text-amber-600">已启用。重新生成会使旧密钥立即失效。</p>
+        <p className="text-xs text-amber-600">已启用。旧版密钥需去掉开头的 ainote_（若有），再在 64 位 secret 前加上账号前缀：{migrationPrefix}。这只迁移格式；若密钥曾泄露，请重新生成。重新生成会使旧密钥立即失效。</p>
       )}
       {err && <p className="text-xs text-red-500">{err}</p>}
       {shownKey && (

@@ -2,6 +2,7 @@
 // 封装 /api/memory/* 路由调用，供 Chatbot store 使用
 // 不在此文件做任何向量运算——所有计算都在服务端 API routes 完成
 
+import { accountLease, isCurrentAccount } from "@/lib/account-boundary";
 import type { LLMConfig } from "@/api/llm";
 
 export interface MemorySnippet {
@@ -16,12 +17,15 @@ export interface MemorySnippet {
 export async function retrieveMemories(
     query: string,
     config: LLMConfig,
-    topK = 5
+    topK = 5,
+    lease = accountLease()
 ): Promise<string[]> {
+    if (!isCurrentAccount(lease)) return [];
     try {
         const res = await fetch("/api/memory/retrieve", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { "Content-Type": "application/json", "X-Workspace-Owner": lease.owner! },
+            signal: lease.signal,
             body: JSON.stringify({ query, topK, config }),
         });
         if (!res.ok) return [];
@@ -38,13 +42,15 @@ export async function retrieveMemories(
 export async function storeSession(
     sessionId: string,
     messages: { role: string; content: string }[],
-    config: LLMConfig
+    config: LLMConfig,
+    lease = accountLease()
 ): Promise<void> {
-    if (messages.length === 0) return;
+    if (messages.length === 0 || !isCurrentAccount(lease)) return;
     try {
         await fetch("/api/memory/store", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { "Content-Type": "application/json", "X-Workspace-Owner": lease.owner! },
+            signal: lease.signal,
             body: JSON.stringify({ sessionId, messages, config }),
         });
     } catch {

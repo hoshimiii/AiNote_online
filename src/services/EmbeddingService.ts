@@ -7,15 +7,7 @@
 // - 所有参数通过 config 对象传入，不依赖环境变量
 
 import type { LLMConfig } from "@/api/llm";
-
-/** 从 chat completions URL 推导出 embeddings URL */
-function resolveEmbeddingEndpoint(baseurl: string): string {
-    return (
-        baseurl
-            .replace(/\/chat\/completions$/, "")
-            .replace(/\/$/, "") + "/embeddings"
-    );
-}
+import { providerEndpoint, publicProviderPost } from "./PublicProviderTransport";
 
 /** 根据 baseurl 自动选择合适的 embedding 模型 */
 function resolveEmbeddingModel(baseurl: string): string {
@@ -29,7 +21,7 @@ function resolveEmbeddingModel(baseurl: string): string {
  * @throws 当 HTTP 响应非 2xx 时抛出包含状态码的错误
  */
 export async function generateEmbedding(text: string, config: LLMConfig): Promise<number[]> {
-    const endpoint = resolveEmbeddingEndpoint(config.baseurl);
+    const endpoint = providerEndpoint(config.baseurl, "embeddings");
     const model = resolveEmbeddingModel(config.baseurl);
 
     // OpenAI 新模型支持 dimensions 截断；旧模型仅 BAAI/bge-m3 原生 1024 维
@@ -39,14 +31,7 @@ export async function generateEmbedding(text: string, config: LLMConfig): Promis
         body.dimensions = 1024;
     }
 
-    const res = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${config.usertoken}`,
-        },
-        body: JSON.stringify(body),
-    });
+    const res = await publicProviderPost(endpoint, `Bearer ${config.usertoken}`, JSON.stringify(body));
 
     if (!res.ok) {
         const errorText = await res.text().catch(() => "");
@@ -79,8 +64,7 @@ function baseurl_is_siliconflow(baseurl: string): boolean {
  * - 否则返回一段不超过 200 字的中文摘要用于向量化。
  */
 export async function summarizeTextForEmbedding(text: string, config: LLMConfig, maxTokens = 300): Promise<string> {
-    const baseurl = config.baseurl.replace(/\/chat\/completions$/, "").replace(/\/$/, "");
-    const endpoint = `${baseurl}/chat/completions`;
+    const endpoint = providerEndpoint(config.baseurl, "chat/completions");
 
     const hasCodeFence = /```|<code>|function\s+\w+\(|=>|\{\s*\n/.test(text);
 
@@ -98,14 +82,7 @@ export async function summarizeTextForEmbedding(text: string, config: LLMConfig,
         max_tokens: maxTokens,
     };
 
-    const res = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${config.usertoken}`,
-        },
-        body: JSON.stringify(body),
-    });
+    const res = await publicProviderPost(endpoint, `Bearer ${config.usertoken}`, JSON.stringify(body));
 
     if (!res.ok) {
         const txt = await res.text().catch(() => "");

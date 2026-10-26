@@ -1,35 +1,15 @@
 import { NextResponse } from "next/server"
-import bcrypt from "bcryptjs"
-import { prisma } from "@/lib/prisma"
+import { authenticateMcp } from "@/lib/mcp-auth"
 import { dispatch } from "@/lib/mcp-helpers"
 
 export const dynamic = "force-dynamic"
 
-async function authenticateByApiKey(req: Request): Promise<string | null> {
-  const authHeader = req.headers.get("authorization")
-  if (!authHeader?.startsWith("Bearer ")) return null
-
-  const token = authHeader.slice(7).trim()
-  const raw = token.startsWith("ainote_") ? token.slice(7) : token
-
-  const users = await prisma.user.findMany({
-    where: { mcpApiKey: { not: null } },
-    select: { id: true, mcpApiKey: true },
-  })
-
-  for (const user of users) {
-    if (user.mcpApiKey && (await bcrypt.compare(raw, user.mcpApiKey))) {
-      return user.id
-    }
-  }
-  return null
-}
-
 export async function POST(req: Request) {
-  const userId = await authenticateByApiKey(req)
-  if (!userId) {
-    return NextResponse.json({ error: "Invalid API Key" }, { status: 401 })
+  const result = await authenticateMcp(req)
+  if ("error" in result) {
+    return NextResponse.json({ error: result.error }, { status: result.status })
   }
+  const { userId } = result
 
   let body: { toolName?: string; arguments?: Record<string, unknown> }
   try {

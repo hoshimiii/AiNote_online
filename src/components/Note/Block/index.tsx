@@ -1,3 +1,4 @@
+import { EXECUTION_UNAVAILABLE } from "@/services/CodeExecutor";
 import { type Block as BlockType } from "@/store/kanban";
 import ReactMarkdown from "react-markdown";
 import rehypeKatex from "rehype-katex";
@@ -52,8 +53,8 @@ const CodeToolbar = ({
         </select>
         <button
             onClick={(e) => { e.stopPropagation(); onExecute(); }}
-            disabled={isRunning}
-            title="运行代码"
+            disabled
+            title={EXECUTION_UNAVAILABLE}
             aria-label="运行代码"
             className="relative z-10 text-black-500 text-sm flex mr-auto items-center px-3 py-1 rounded-md bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:opacity-60 disabled:bg-indigo-400 transition-shadow shadow-sm"
         >
@@ -65,7 +66,7 @@ const CodeToolbar = ({
             ) : (
                 <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
             )}
-            <span className="ml-0.5">{isRunning ? "运行中..." : "运行"}</span>
+            <span className="ml-0.5">执行暂不可用</span>
         </button>
         <div></div>
     </div>
@@ -219,7 +220,7 @@ export const Block = ({
     onUpdateBlock?: (updates: Partial<BlockType>) => void;
 }) => {
     const [isEditing, setIsEditing] = useState(false);
-    const [isRunning, setIsRunning] = useState(false);
+    const isRunning = false;
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const previewRef = useRef<HTMLDivElement>(null);
     const pendingCursorRef = useRef<number>(content.length);
@@ -269,41 +270,8 @@ export const Block = ({
         onChange(next);
     };
 
-    const handleExecute = async () => {
-        if (isRunning || block.blockType !== "code") return;
-        setIsRunning(true);
-        try {
-            const res = await fetch("/api/execute", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ code: content, language: block.language || "javascript" }),
-            });
-            const data = await res.json();
-            if (!res.ok) {
-                onUpdateBlock?.({
-                    executionOutput: "",
-                    executionError: data.error || `HTTP ${res.status}`,
-                    executionExitCode: 1,
-                    executionTimestamp: new Date().toISOString(),
-                });
-            } else {
-                onUpdateBlock?.({
-                    executionOutput: data.stdout || "",
-                    executionError: data.stderr || "",
-                    executionExitCode: data.exitCode ?? 0,
-                    executionTimestamp: new Date().toISOString(),
-                });
-            }
-        } catch (err) {
-            onUpdateBlock?.({
-                executionOutput: "",
-                executionError: (err as Error)?.message ?? "网络错误",
-                executionExitCode: 1,
-                executionTimestamp: new Date().toISOString(),
-            });
-        } finally {
-            setIsRunning(false);
-        }
+    const handleExecute = () => {
+        onUpdateBlock?.({ executionOutput: "", executionError: EXECUTION_UNAVAILABLE, executionExitCode: 1 });
     };
 
     const handleClearOutput = () => {

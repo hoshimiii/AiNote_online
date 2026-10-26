@@ -29,6 +29,9 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     const userId = session.user.id;
+    if (req.headers.get("X-Workspace-Owner") !== userId) {
+        return NextResponse.json({ error: "Workspace owner changed" }, { status: 409 });
+    }
 
     let body: StoreBody;
     try {

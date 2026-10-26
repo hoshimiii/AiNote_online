@@ -13,10 +13,14 @@ import { prisma } from "@/lib/prisma"
 export const dynamic = "force-dynamic"
 
 // GET /api/sync — 拉取当前用户的最新看板快照
-export async function GET() {
+export async function GET(req: Request) {
   const session = await auth()
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
+
+  if (req.headers.get("X-Workspace-Owner") !== session.user.id) {
+    return NextResponse.json({ error: "Workspace owner changed" }, { status: 409 })
   }
 
   const snapshot = await prisma.workspaceSnapshot.findUnique({
@@ -37,6 +41,10 @@ export async function PUT(req: Request) {
   const session = await auth()
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
+
+  if (req.headers.get("X-Workspace-Owner") !== session.user.id) {
+    return NextResponse.json({ error: "Workspace owner changed" }, { status: 409 })
   }
 
   let data: unknown

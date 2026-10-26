@@ -29,6 +29,8 @@ const buildSystemPrompt = (userRules?: string, relatedMemories?: string[]) => {
  * onToolError 返回 "retry" 触发重试，返回 "abort" 提前终止。
  */
 export interface RunConfig {
+    signal?: AbortSignal;
+    isCurrent?: () => boolean;
     onTrace?: (trace: AgentTrace) => void;
     onStreamDelta?: (delta: string) => void;
     onStreamReset?: () => void;
@@ -89,7 +91,8 @@ function messageContentString(content: unknown): string {
 async function compressHistory(
     messages: BaseMessage[],
     model: ReturnType<typeof createLangChainModel>,
-    charThreshold = 8000
+    charThreshold = 8000,
+    signal?: AbortSignal
 ): Promise<BaseMessage[]> {
     const nonSystem = messages.filter((m) => !(m instanceof SystemMessage));
     const totalChars = nonSystem.reduce((s, m) => s + String(m.content).length, 0);
@@ -109,7 +112,7 @@ async function compressHistory(
         const summaryMsg = await model.invoke([
             new SystemMessage("请用不超过 300 字的中文概括以下对话的核心主题和结论，输出纯文本摘要。"),
             new HumanMessage(dialogueText),
-        ]);
+        ], { signal });
         const summary = messageContentString(summaryMsg.content);
         return [...systemMessages, new AIMessage(`[历史摘要] ${summary}`), ...toKeep];
     } catch {
@@ -129,6 +132,11 @@ export const runLangChainAgent = async (
     }
     const { onTrace, onStreamDelta, onStreamReset, onToolError, maxSteps: _maxSteps = 20, relatedMemories } =
         options ?? {};
+    const checkAccount = () => {
+        options?.signal?.throwIfAborted();
+        if (options?.isCurrent && !options.isCurrent()) throw new Error("Account changed");
+    };
+    checkAccount();
     const maxSteps = _maxSteps;
     const model = createLangChainModel(config);
     const toolSchemas = createOpenAIToolSchemas();
@@ -148,13 +156,16 @@ export const runLangChainAgent = async (
     ];
 
     // Phase 4：摘要压缩 — 当非系统消息总字符超过 8000 时，压缩旧历史防止 context 溢出
-    messages = await compressHistory(messages, model);
+    messages = await compressHistory(messages, model, 8000, options?.signal);
+    checkAccount();
 
     for (let i = 0; i < maxSteps; i++) {
+        checkAccount();
         const step = i + 1;
         let gathered: AIMessageChunk | undefined;
-        const tokenStream = await modelWithTools.stream(messages);
+        const tokenStream = await modelWithTools.stream(messages, { signal: options?.signal });
         for await (const part of tokenStream) {
+            checkAccount();
             gathered = gathered ? gathered.concat(part) : part;
             const delta = textDeltaFromChunk(part);
             if (delta) onStreamDelta?.(delta);
@@ -176,6 +187,7 @@ export const runLangChainAgent = async (
         onStreamReset?.();
 
         for (const toolCall of toolCalls) {
+            checkAccount();
             onTrace?.({
                 step,
                 phase: "action",
@@ -188,7 +200,9 @@ export const runLangChainAgent = async (
                 result = `错误: 未找到名为 '${toolCall.name}' 的工具。`;
             } else {
                 try {
+                    checkAccount();
                     result = await executeFn(toolCall.args);
+                    checkAccount();
                 } catch (e: unknown) {
                     const errMsg = `工具执行出错: ${e instanceof Error ? e.message : String(e)}`;
                     const action = onToolError?.(toolCall.name, errMsg, step) ?? "continue";
