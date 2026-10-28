@@ -2,9 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
-const ALLOWED_PROTOCOLS = new Set(["http:", "https:"]);
-// 禁止转发到内网地址，防止 SSRF
-const BLOCKED_HOSTNAMES = new Set(["localhost", "127.0.0.1", "::1", "0.0.0.0"]);
+import { providerEndpoint, publicProviderPost, ProviderDestinationError, readProviderBody } from "@/services/PublicProviderTransport";
 
 /**
  * LLM 流式代理路由
@@ -28,38 +26,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "X-Target-URL header is required" }, { status: 400 });
   }
 
-  let targetURL: URL;
-  try {
-    targetURL = new URL(targetBase);
-  } catch {
-    return NextResponse.json({ error: "Invalid X-Target-URL" }, { status: 400 });
-  }
-
-  if (!ALLOWED_PROTOCOLS.has(targetURL.protocol)) {
-    return NextResponse.json({ error: "X-Target-URL must use http or https" }, { status: 400 });
-  }
-
-  if (BLOCKED_HOSTNAMES.has(targetURL.hostname)) {
-    return NextResponse.json({ error: "X-Target-URL hostname not allowed" }, { status: 400 });
-  }
-
-  const upstreamURL = `${targetBase.replace(/\/$/, "")}/chat/completions`;
-  const body = await req.text();
-
   let upstream: Response;
   try {
-    upstream = await fetch(upstreamURL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: auth,
-      },
-      body,
-    });
-  } catch (e) {
+    const target = providerEndpoint(targetBase, "chat/completions");
+    upstream = await publicProviderPost(target, auth, await readProviderBody(req), req.signal);
+  } catch (error) {
     return NextResponse.json(
-      { error: `Upstream connection failed: ${e instanceof Error ? e.message : String(e)}` },
-      { status: 502 },
+      { error: error instanceof ProviderDestinationError ? error.message : "Upstream connection failed" },
+      { status: error instanceof ProviderDestinationError ? 400 : 502 },
     );
   }
 

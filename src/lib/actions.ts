@@ -8,6 +8,7 @@
 "use server"
 
 import { randomBytes } from "crypto"
+import { mcpKeyPrefix } from "./mcp-auth"
 import { signIn, signOut, auth } from "./auth"
 import { AuthError } from "next-auth"
 import { prisma } from "./prisma"
@@ -91,14 +92,14 @@ export async function logoutAction() {
   await signOut({ redirectTo: "/login" })
 }
 
-export async function getMcpApiKeyStatus(): Promise<{ hasKey: boolean }> {
+export async function getMcpApiKeyStatus(): Promise<{ hasKey: boolean; migrationPrefix?: string }> {
   const session = await auth()
   if (!session?.user?.id) return { hasKey: false }
   const u = await prisma.user.findUnique({
     where: { id: session.user.id },
     select: { mcpApiKey: true },
   })
-  return { hasKey: !!u?.mcpApiKey }
+  return { hasKey: !!u?.mcpApiKey, migrationPrefix: mcpKeyPrefix(session.user.id) }
 }
 
 export async function generateMcpApiKey(): Promise<{ key: string } | { error: string }> {
@@ -113,5 +114,5 @@ export async function generateMcpApiKey(): Promise<{ key: string } | { error: st
     data: { mcpApiKey: hashed },
   })
 
-  return { key: `ainote_${raw}` }
+  return { key: `${mcpKeyPrefix(session.user.id)}${raw}` }
 }

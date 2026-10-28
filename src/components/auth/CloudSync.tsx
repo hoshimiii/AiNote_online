@@ -1,34 +1,9 @@
-// CloudSync — 云端同步组件
-//
-// 核心知识点：
-// 1. 这是一个纯逻辑组件（返回 null），专门处理云端同步副作用。
-// 2. 将其放在 <ZustandRehydrate> 内部，保证 zustand 本地状态已恢复后才开始与云端对比。
-// 3. 同步策略：Last-Write-Wins（LWW）
-//    - 比较云端的 updatedAt 和本地最后同步时间戳
-//    - 云端更新 → 拉取覆盖本地（跨设备时场景）
-//    - 本地更新 → 推送到云端（刚注册的用户 / 修改了数据）
-// 4. 防抖（debounce）：zustand subscribe 会在每次状态变化时触发，
-//    用 setTimeout 延迟 2 秒再推送，避免每次按键都发一个 PUT 请求。
-// 5. isSyncing flag：防止从云端拉取数据后，setState 又触发 subscribe 导致立刻回写。
-
-// CloudSync — 云端同步组件
-//
-// 核心知识点：
-// 1. 这是一个纯逻辑组件（返回 null），专门处理云端同步副作用。
-// 2. 将其放在 <ZustandRehydrate> 内部，保证 zustand 本地状态已恢复后才开始与云端对比。
-// 3. 同步策略：Last-Write-Wins（LWW）
-//    - 比较云端的 updatedAt 和本地最后同步时间戳
-//    - 云端更新 → 拉取覆盖本地（跨设备时场景）
-//    - 本地更新 → 推送到云端（刚注册的用户 / 修改了数据）
-// 4. 防抖（debounce）：zustand subscribe 会在每次状态变化时触发，
-//    用 setTimeout 延迟 2 秒再推送，避免每次按键都发一个 PUT 请求。
-// 5. isSyncing flag：防止从云端拉取数据后，setState 又触发 subscribe 导致立刻回写。
-
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useState } from "react"
 import { useSession } from "next-auth/react"
 import { useWorkSpace } from "@/store/kanban"
+import { accountLease, isCurrentAccount, GUEST_OWNER } from "@/lib/account-boundary"
 import { useChatbot} from '@/store/Chatbot'
 
 const KANBAN_LOCAL_ONLY_KEYS = new Set([
@@ -117,135 +92,113 @@ function validateAndApplyCloudData(
     useChatbot.setState(mergedChatbot as any)
   }
 
-  setTimeout(() => { isSyncing.current = false }, 200)
+  isSyncing.current = false
   return true
+}
+
+export function startCloudSync(owner: string, onState: (state: "pulling" | "pushing" | "done" | null) => void) {
+  const lease = accountLease()
+  const controller = new AbortController()
+  const isSyncing = { current: false }
+  let stopped = false
+  let ready = false
+  let debounce: ReturnType<typeof setTimeout> | undefined
+  let doneTimer: ReturnType<typeof setTimeout> | undefined
+  let pushing = false
+  let dirty = false
+  const current = () => !stopped && owner === lease.owner && isCurrentAccount(lease)
+  const headers = { "Content-Type": "application/json", "X-Workspace-Owner": owner }
+  const stopRequests = () => controller.abort()
+  lease.signal.addEventListener("abort", stopRequests, { once: true })
+  const done = () => {
+    if (!current()) return
+    onState("done")
+    clearTimeout(doneTimer)
+    doneTimer = setTimeout(() => { if (current()) onState(null) }, 1500)
+  }
+  const push = async () => {
+    if (!current() || !ready) return
+    if (pushing) { dirty = true; return }
+    pushing = true
+    dirty = false
+    onState("pushing")
+    try {
+      const snapshot = { ...extractKanbanState(useWorkSpace.getState()), _chatbot: extractChatbotState() }
+      const res = await fetch("/api/sync", { method: "PUT", headers, body: JSON.stringify(snapshot), signal: controller.signal })
+      if (!res.ok) throw new Error("Cloud upload failed")
+      const result = await res.json()
+      if (!current()) return
+      if (result.updatedAt) {
+        isSyncing.current = true
+        useWorkSpace.getState().setCloudSyncTime(result.updatedAt)
+        isSyncing.current = false
+      }
+      done()
+    } catch { if (current()) onState(null) }
+    finally {
+      pushing = false
+      if (dirty && current()) { clearTimeout(debounce); debounce = setTimeout(() => void push(), 2000) }
+    }
+  }
+  const changed = () => {
+    if (!current() || isSyncing.current) return
+    dirty = true
+    if (!ready) return
+    clearTimeout(debounce)
+    debounce = setTimeout(() => void push(), 2000)
+  }
+  const pull = async (initial: boolean) => {
+    if (!current() || (!initial && (dirty || pushing))) return
+    onState("pulling")
+    try {
+      const res = await fetch("/api/sync", { headers, signal: controller.signal })
+      if (!res.ok) throw new Error("Cloud download failed")
+      const result = await res.json()
+      if (!current()) return
+      if (result.data) {
+        const localTime = useWorkSpace.getState()._cloudSyncTime
+        if (!dirty && new Date(result.updatedAt).getTime() > (localTime ? new Date(localTime).getTime() : 0)) {
+          // A malformed cloud snapshot must not trigger an automatic overwrite.
+          if (!validateAndApplyCloudData(result.data, isSyncing)) { onState(null); return }
+          isSyncing.current = true
+          useWorkSpace.getState().setCloudSyncTime(result.updatedAt)
+          isSyncing.current = false
+        }
+      }
+      ready = true
+      if (!result.data || dirty) await push()
+      else done()
+    } catch { if (current()) onState(null) }
+  }
+  const unsubKanban = useWorkSpace.subscribe(changed)
+  const unsubChatbot = useChatbot.subscribe(changed)
+  const visible = () => { if (document.visibilityState === "visible") void pull(false) }
+  document.addEventListener("visibilitychange", visible)
+  void pull(true)
+  return () => {
+    stopped = true
+    controller.abort()
+    lease.signal.removeEventListener("abort", stopRequests)
+    clearTimeout(debounce)
+    clearTimeout(doneTimer)
+    unsubKanban()
+    unsubChatbot()
+    document.removeEventListener("visibilitychange", visible)
+  }
 }
 
 export function CloudSync() {
   const { data: session, status } = useSession()
-  const hasPulled = useRef(false)
-  const isSyncing = useRef(false)
-  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const [syncState, setSyncState] = useState<"pulling" | "pushing" | "done" | null>(null)
-
-  const pushToCloud = () => {
-    const snapshot = {
-      ...extractKanbanState(useWorkSpace.getState()),
-      _chatbot: extractChatbotState(),
-    }
-    fetch("/api/sync", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(snapshot),
-    })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((result) => {
-        if (result?.updatedAt) {
-          isSyncing.current = true
-          useWorkSpace.getState().setCloudSyncTime(result.updatedAt)
-          setTimeout(() => { isSyncing.current = false }, 100)
-        }
-      })
-      .catch(console.error)
-  }
-
+  const owner = status === "authenticated" ? session?.user?.id : undefined
+  const [state, setState] = useState<"pulling" | "pushing" | "done" | null>(null)
   useEffect(() => {
-    if (status !== "authenticated" || !session?.user?.id || hasPulled.current) return
-    hasPulled.current = true
-    setSyncState("pulling")
-
-    fetch("/api/sync")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((result) => {
-        if (!result?.data) {
-          setSyncState("pushing")
-          pushToCloud()
-          setTimeout(() => setSyncState("done"), 1500)
-          return
-        }
-
-        const cloudTime = new Date(result.updatedAt).getTime()
-        const localSyncTime = useWorkSpace.getState()._cloudSyncTime
-        const lastSynced = localSyncTime ? new Date(localSyncTime).getTime() : 0
-
-        if (cloudTime > lastSynced) {
-          const applied = validateAndApplyCloudData(result.data, isSyncing)
-          if (applied) {
-            useWorkSpace.getState().setCloudSyncTime(result.updatedAt)
-          } else {
-            console.warn("[CloudSync] 云端数据验证失败，以本地数据覆盖云端")
-            setSyncState("pushing")
-            pushToCloud()
-          }
-        }
-        setTimeout(() => setSyncState("done"), 1500)
-      })
-      .catch(() => setSyncState(null))
-  }, [status, session?.user?.id])
-
-  useEffect(() => {
-    if (status !== "authenticated") return
-
-    const unsubKanban = useWorkSpace.subscribe(() => {
-      if (isSyncing.current) return
-      if (debounceTimer.current) clearTimeout(debounceTimer.current)
-      debounceTimer.current = setTimeout(pushToCloud, 2000)
-    })
-
-    const unsubChatbot = useChatbot.subscribe(() => {
-      if (isSyncing.current) return
-      if (debounceTimer.current) clearTimeout(debounceTimer.current)
-      debounceTimer.current = setTimeout(pushToCloud, 2000)
-    })
-
-    const onVisible = () => {
-      if (document.visibilityState !== "visible") return
-      fetch("/api/sync")
-        .then((res) => (res.ok ? res.json() : null))
-        .then((result) => {
-          if (!result?.data) return
-          const cloudTime = new Date(result.updatedAt).getTime()
-          const localSyncTime = useWorkSpace.getState()._cloudSyncTime
-          const lastSynced = localSyncTime ? new Date(localSyncTime).getTime() : 0
-          if (cloudTime > lastSynced) {
-            const applied = validateAndApplyCloudData(result.data, isSyncing)
-            if (applied) useWorkSpace.getState().setCloudSyncTime(result.updatedAt)
-          }
-        })
-        .catch(console.error)
-    }
-
-    document.addEventListener("visibilitychange", onVisible)
-
-    return () => {
-      unsubKanban()
-      unsubChatbot()
-      document.removeEventListener("visibilitychange", onVisible)
-      if (debounceTimer.current) clearTimeout(debounceTimer.current)
-    }
-  }, [status])
-
-  useEffect(() => {
-    if (status === "unauthenticated") {
-      hasPulled.current = false
-    }
-  }, [status])
-
-  if (!syncState || syncState === null) return null
-
+    if (!owner || owner === GUEST_OWNER) return
+    return startCloudSync(owner, setState)
+  }, [owner])
+  if (!state) return null
   return (
-    <div className="fixed top-4 left-1/2 -translate-x-1/2 z-9999 flex items-center gap-2 rounded-full bg-background border shadow-md px-4 py-2 text-sm text-foreground transition-all">
-      {syncState === "done" ? (
-        <>
-          <span className="h-2 w-2 rounded-full bg-green-500" />
-          数据已同步
-        </>
-      ) : (
-        <>
-          <span className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
-          {syncState === "pulling" ? "正在从云端读取数据..." : "正在上传本地数据..."}
-        </>
-      )}
+    <div className="fixed top-4 left-1/2 -translate-x-1/2 z-9999 rounded-full bg-background border px-4 py-2 text-sm" role="status">
+      {state === "done" ? "数据已同步" : state === "pulling" ? "正在从云端读取数据..." : "正在上传本地数据..."}
     </div>
   )
 }

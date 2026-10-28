@@ -1,6 +1,7 @@
 import { generateRandomId } from "@/components/utils/RandomGenerator";
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { persist, createJSONStorage } from "zustand/middleware";
+import { accountLease, isCurrentAccount, accountStorage } from "@/lib/account-boundary";
 import { sliceContext, type LLMConfig, type ApiMessage } from "@/services/LLMService";
 import { runLangChainAgent } from "@/agent/langchain/runner";
 import { retrieveMemories, storeSession } from "@/services/MemoryManager";
@@ -67,9 +68,16 @@ export const useChatbot = create<ChatbotState>()(
 
             sendMessage: async (input: string) => {
                 if (!input.trim()) return;
-                if (!get().config.usertoken?.trim()) {
+                const lease = accountLease();
+                if (!isCurrentAccount(lease)) return;
+                const config = { ...get().config };
+                const sessionId = get().chatbotId;
+                const guardedSet = (partial: Partial<ChatbotState> | ((state: ChatbotState) => Partial<ChatbotState>)) => {
+                    if (isCurrentAccount(lease)) set(partial);
+                };
+                if (!config.usertoken?.trim()) {
                     const now = new Date().toISOString();
-                    set((state) => ({
+                    guardedSet((state) => ({
                         messages: [
                             ...state.messages,
                             {
@@ -99,7 +107,7 @@ export const useChatbot = create<ChatbotState>()(
                     messageCreatedAt: now,
                     messageTimestamp: Date.now(),
                 };
-                set((state) => ({ messages: [...state.messages, userMsg], isLoading: true }));
+                guardedSet((state) => ({ messages: [...state.messages, userMsg], isLoading: true }));
 
                 const botMsgId = generateRandomId();
                 const botMsg: Message = {
@@ -109,7 +117,7 @@ export const useChatbot = create<ChatbotState>()(
                     messageCreatedAt: now,
                     messageTimestamp: Date.now(),
                 };
-                set((state) => ({ messages: [...state.messages, botMsg] }));
+                guardedSet((state) => ({ messages: [...state.messages, botMsg] }));
 
                 const historyLines = get()
                     .messages
@@ -118,13 +126,16 @@ export const useChatbot = create<ChatbotState>()(
                     .map((m) => `${m.role}: ${m.messageContent}`);
 
                 // 语义检索相关历史记忆（失败时静默降级为空数组）
-                const relatedMemories = await retrieveMemories(input, get().config).catch(() => []);
+                const relatedMemories = await retrieveMemories(input, config, 5, lease).catch(() => []);
 
+                if (!isCurrentAccount(lease)) return;
                 try {
-                    const answer = await runLangChainAgent(get().config, input, historyLines, {
+                    const answer = await runLangChainAgent(config, input, historyLines, {
                         relatedMemories,
+                        signal: lease.signal,
+                        isCurrent: () => isCurrentAccount(lease),
                         onStreamDelta: (delta) => {
-                            set((state) => ({
+                            guardedSet((state) => ({
                                 messages: state.messages.map((m) =>
                                     m.messageId === botMsgId
                                         ? { ...m, messageContent: m.messageContent + delta }
@@ -133,7 +144,7 @@ export const useChatbot = create<ChatbotState>()(
                             }));
                         },
                         onStreamReset: () => {
-                            set((state) => ({
+                            guardedSet((state) => ({
                                 messages: state.messages.map((m) =>
                                     m.messageId === botMsgId ? { ...m, messageContent: "" } : m
                                 ),
@@ -146,7 +157,7 @@ export const useChatbot = create<ChatbotState>()(
                                     : phase === "action"
                                         ? `动作 ${step}`
                                         : `观察 ${step}`;
-                            set((state) => ({
+                            guardedSet((state) => ({
                                 messages: [
                                     ...state.messages,
                                     {
@@ -162,7 +173,7 @@ export const useChatbot = create<ChatbotState>()(
                             }));
                         },
                     });
-                    set((state) => ({
+                    guardedSet((state) => ({
                         messages: state.messages.map((m) =>
                             m.messageId === botMsgId
                                 ? { ...m, messageContent: answer }
@@ -171,13 +182,15 @@ export const useChatbot = create<ChatbotState>()(
                     }));
 
                     // 异步存储本轮对话到向量记忆库（不阻塞 UI）
+                    if (!isCurrentAccount(lease)) return;
                     void storeSession(
-                        get().chatbotId,
+                        sessionId,
                         [
                             { role: "user", content: input },
                             { role: "assistant", content: answer },
                         ],
-                        get().config
+                        config,
+                        lease
                     );
                 } catch (e) {
                     let errMsg = e instanceof Error ? e.message : String(e);
@@ -185,13 +198,13 @@ export const useChatbot = create<ChatbotState>()(
                         errMsg =
                             "401 未授权：密钥无效或未带上。请在设置中检查 API Key，SiliconFlow 需在控制台创建令牌；Base URL 一般为 https://api.siliconflow.cn/v1/chat/completions（保存后会自动去掉末尾路径换成 /v1）。";
                     }
-                    set((state) => ({
+                    guardedSet((state) => ({
                         messages: state.messages.map((m) =>
                             m.messageId === botMsgId ? { ...m, messageContent: `错误: ${errMsg}` } : m
                         ),
                     }));
                 } finally {
-                    set({ isLoading: false });
+                    guardedSet({ isLoading: false });
                 }
             },
 
@@ -206,6 +219,6 @@ export const useChatbot = create<ChatbotState>()(
                     isLoading: false,
                 }),
         }),
-        { name: "chatbot-storage" }
+        { name: "chatbot-storage", skipHydration: true, storage: createJSONStorage(() => accountStorage) }
     )
 );

@@ -1,5 +1,6 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { persist, createJSONStorage } from 'zustand/middleware'
+import { accountStorage } from '@/lib/account-boundary'
 
 export type SubTask = {
     subTaskId: string;
@@ -1320,6 +1321,7 @@ export const useWorkSpace = create<WorkSpaceProps>()(
         }),
                 {
             name: 'workspace-storage',
+            storage: createJSONStorage(() => accountStorage),
             version: 6,
             skipHydration: true, // ZustandRehydrate 组件会在客户端手动触发 rehydrate()
             migrate: (persistedState: unknown, version: number): WorkSpaceProps => {
